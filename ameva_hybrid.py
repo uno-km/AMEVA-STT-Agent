@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 
-SCRIPT_VERSION = "v1.1"
+SCRIPT_VERSION = "v1.2"
 SCRIPT_MODIFIED = "2026-05-04"
 
 # ==========================================
