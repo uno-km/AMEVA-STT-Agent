@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 
-SCRIPT_VERSION = "v1.3"
+SCRIPT_VERSION = "v1.4"
 SCRIPT_MODIFIED = "2026-05-04"
 
 # ==========================================
@@ -575,12 +575,13 @@ def main():
     
     # [핵심] 사용자가 입력 안 하면 알아서 기본값(default) 적용
     parser.add_argument("--speakers", type=int, default=2, help="오디오 내 예상 화자 수 지정 (기본값: 2)")
-    parser.add_argument("--max_offset", type=float, default=3.0, help="매핑 허용 최대 오차 시간(초) (기본값: 3.0)")
+    parser.add_argument("--max_offset", type=float, default=2.0, help="매핑 허용 최대 오차 시간(초) (기본값: 2.0 - 더 엄격)")
     parser.add_argument("--output", type=str, default="ameva_result", help="결과 출력 파일 접두사 (예: ameva_result)")
     parser.add_argument("-ko", "--ko", dest="ko", action="store_true", help="한국어(Korean) 위스퍼 모드 발동 (-l ko)")
-    parser.add_argument("--whisper_max_len", type=int, default=30, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준, 시간 단위 아님) - 기본값 낮춤")
-    parser.add_argument("--whisper_split_on_word", action="store_true", help="Whisper.cpp -sow 옵션 사용: 단어 경계 기준 분리 (기본값: 사용 안 함)")
-    parser.add_argument("--whisper_vad", action="store_true", help="Whisper.cpp VAD (Voice Activity Detection) 활성화: 음성/침묵 기준 세그먼트 분리")
+    parser.add_argument("--whisper_max_len", type=int, default=20, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준) - 더 짧은 분할 (기본값: 20)")
+    parser.add_argument("--whisper_split_on_word", action="store_true", default=True, help="Whisper.cpp -sow 옵션: 단어 경계 기준 분리 (기본값: 활성화)")
+    parser.add_argument("--whisper_no_split_on_word", dest="whisper_split_on_word", action="store_false", help="-sow 옵션 비활성화 (기본값 무시)")
+    parser.add_argument("--whisper_vad", action="store_true", help="[실험] Whisper.cpp VAD 활성화 (일부 버전 미지원) - 기본값: 비활성화")
     parser.add_argument("--whisper_vad_max_speech_duration", type=int, default=5, help="VAD 최대 연속 음성 길이 (초) (기본값: 5)")
     parser.add_argument("--whisper_vad_min_silence_duration", type=int, default=500, help="VAD 최소 침묵 길이 (밀리초) (기본값: 500)")
     
