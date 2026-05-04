@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  stt_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - C:\ameva:/app/data  # Mount Windows host path
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Run the batch manager in headless mode instead of GUI
+    command: ["python", "main.py", "--headless"]

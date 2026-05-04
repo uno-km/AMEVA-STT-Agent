@@ -1,0 +1,14 @@
+PyQt6==6.7.0
+PyQt6-Qt6==6.7.0
+PyQt6-sip==13.6.0
+numpy==1.26.4
+scipy==1.13.0
+matplotlib==3.8.4
+scikit-learn==1.4.2
+# CPU versions of torch
+torch==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu
+torchaudio==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu
+# whisper.cpp python bindings
+whisper-cpp-python==0.3.0
+# vosk for diarization
+vosk==0.3.45
