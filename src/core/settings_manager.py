@@ -2,78 +2,67 @@ import json
 import os
 from PyQt6.QtCore import QObject, pyqtSignal
 
-SETTINGS_FILE = "settings.json"
-
-DEFAULT_SETTINGS = {
-    "theme": "dark",
-    "stt": {
-        "model": "ggml-medium-q5_0.bin",
-        "language": "ko",
-        "threads": 4,
-        "temperature": 0.0
-    },
-    "diarization": {
-        "margin": 0.5,
-        "max_speakers": 4
-    },
-    "batch": {
-        "input_folder": "",
-        "output_folder": "",
-        "cycle_minutes": 60
-    }
-}
-
 class SettingsManager(QObject):
     settings_changed = pyqtSignal(dict)
-
     _instance = None
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super(SettingsManager, cls).__new__(cls, *args, **kwargs)
-            cls._instance.init_manager()
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
 
-    def init_manager(self):
+    def __init__(self):
+        if self._initialized: return
         super().__init__()
-        self.settings = DEFAULT_SETTINGS.copy()
-        self.load_settings()
+        self.settings_file = "settings.json"
+        self.default_settings = {
+            "theme": "dark",
+            "models_dir": r"C:\ameva\AI_Models",
+            "stt": {
+                "model": "medium", # small, medium, turbo
+                "language": "ko",
+                "threads": 4
+            },
+            "batch": {
+                "input_dir": "",
+                "output_dir": "",
+                "interval_min": 60
+            },
+            "ui": {
+                "splitter_pos": [400, 400, 400, 400]
+            }
+        }
+        self.settings = self.default_settings.copy()
+        self.load()
+        self._initialized = True
 
-    def load_settings(self):
-        if os.path.exists(SETTINGS_FILE):
+    def load(self):
+        if os.path.exists(self.settings_file):
             try:
-                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    loaded = json.load(f)
-                    # Merge loaded settings into default settings to ensure all keys exist
-                    self._merge_dict(self.settings, loaded)
-            except Exception as e:
-                print(f"Error loading settings: {e}")
+                with open(self.settings_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._update_nested_dict(self.settings, data)
+            except: pass
         else:
-            self.save_settings()
+            self.save()
 
-    def save_settings(self):
-        try:
-            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=4, ensure_ascii=False)
-            self.settings_changed.emit(self.settings)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
+    def save(self):
+        with open(self.settings_file, "w", encoding="utf-8") as f:
+            json.dump(self.settings, f, indent=4, ensure_ascii=False)
+        self.settings_changed.emit(self.settings)
 
-    def update_settings(self, section, key, value):
-        if section in self.settings:
-            self.settings[section][key] = value
-            self.save_settings()
-
-    def get(self, section, key=None):
-        if key:
-            return self.settings.get(section, {}).get(key)
-        return self.settings.get(section, {})
-
-    def _merge_dict(self, base, override):
-        for k, v in override.items():
-            if isinstance(v, dict) and k in base and isinstance(base[k], dict):
-                self._merge_dict(base[k], v)
+    def _update_nested_dict(self, base, update):
+        for k, v in update.items():
+            if isinstance(v, dict) and k in base:
+                self._update_nested_dict(base[k], v)
             else:
                 base[k] = v
+
+    def get(self, *keys):
+        d = self.settings
+        for k in keys:
+            d = d.get(k, {})
+        return d
 
 settings_manager = SettingsManager()

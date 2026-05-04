@@ -3,8 +3,8 @@ matplotlib
 numpy
 scipy
 scikit-learn
-# Install torch separately to handle CPU index correctly
-torch
-torchaudio
-whisper-cpp-python
+torch --index-url https://download.pytorch.org/whl/cpu
+torchaudio --index-url https://download.pytorch.org/whl/cpu
+faster-whisper
 vosk
+requests

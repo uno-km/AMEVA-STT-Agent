@@ -1,6 +1,7 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, 
-    QSpinBox, QDoubleSpinBox, QPushButton, QLabel, QMessageBox
+    QPushButton, QLabel, QCheckBox, QSpinBox, QMessageBox
 )
 from src.core.settings_manager import settings_manager
 
@@ -8,91 +9,67 @@ class SettingsPanel(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.load_current_settings()
+        self.load_from_json()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(15, 15, 15, 15)
 
-        title = QLabel("⚙️ 파라미터 세팅 (Panel 2)")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title = QLabel("⚙️ STT 엔진 파라미터 설정")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #82aaff; margin-bottom: 10px;")
         layout.addWidget(title)
 
-        form_layout = QFormLayout()
+        form = QFormLayout()
+        
+        # 모델 선택 (Small, Medium, Turbo)
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(["small", "medium", "turbo (v3)"])
+        form.addRow("Whisper 모델 사이즈:", self.combo_model)
 
-        # Theme
-        self.cb_theme = QComboBox()
-        self.cb_theme.addItems(["dark", "light"])
-        form_layout.addRow("테마 모드:", self.cb_theme)
+        # 언어 설정
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["ko", "en", "ja", "zh"])
+        form.addRow("대상 언어 (Language):", self.combo_lang)
 
-        # Whisper Model
-        self.cb_model = QComboBox()
-        self.cb_model.addItems(["ggml-medium-q5_0.bin", "ggml-large-v3-turbo-q5_0.bin"])
-        form_layout.addRow("Whisper 모델:", self.cb_model)
+        # CPU 스레드
+        self.spin_threads = QSpinBox()
+        self.spin_threads.setRange(1, 32)
+        self.spin_threads.setValue(4)
+        form.addRow("CPU 작업 스레드 수:", self.spin_threads)
 
-        # Language
-        self.cb_lang = QComboBox()
-        self.cb_lang.addItems(["ko", "en", "auto"])
-        form_layout.addRow("타겟 언어:", self.cb_lang)
+        # 다크모드 여부
+        self.check_dark = QCheckBox("다크보드 테마 적용")
+        self.check_dark.setChecked(True)
+        form.addRow("UI 테마:", self.check_dark)
 
-        # Threads
-        self.sb_threads = QSpinBox()
-        self.sb_threads.setRange(1, 32)
-        form_layout.addRow("CPU 스레드 수:", self.sb_threads)
+        layout.addLayout(form)
 
-        # Temperature
-        self.db_temp = QDoubleSpinBox()
-        self.db_temp.setRange(0.0, 1.0)
-        self.db_temp.setSingleStep(0.1)
-        form_layout.addRow("Temperature:", self.db_temp)
-
-        # Diarization Margin
-        self.db_margin = QDoubleSpinBox()
-        self.db_margin.setRange(0.0, 5.0)
-        self.db_margin.setSingleStep(0.1)
-        form_layout.addRow("화자분리 오차범위:", self.db_margin)
-
-        layout.addLayout(form_layout)
-
-        # Save Button
-        self.btn_save = QPushButton("💾 설정 저장하기")
-        self.btn_save.setStyleSheet("background-color: #89b4fa; color: #11111b; font-weight: bold; padding: 5px;")
-        self.btn_save.clicked.connect(self.save_settings)
+        # 저장 버튼
+        self.btn_save = QPushButton("💾 설정 저장하기 (settings.json)")
+        self.btn_save.setStyleSheet("""
+            QPushButton { background-color: #3b4252; padding: 10px; border-radius: 5px; font-weight: bold; }
+            QPushButton:hover { background-color: #4c566a; }
+        """)
+        self.btn_save.clicked.connect(self.save_to_json)
         layout.addWidget(self.btn_save)
         
         layout.addStretch()
 
-    def load_current_settings(self):
-        settings = settings_manager.settings
+    def load_from_json(self):
+        s = settings_manager.get("stt")
+        self.combo_model.setCurrentText(s.get("model", "medium"))
+        self.combo_lang.setCurrentText(s.get("language", "ko"))
+        self.spin_threads.setValue(s.get("threads", 4))
         
-        # Theme
-        theme = settings.get("theme", "dark")
-        self.cb_theme.setCurrentText(theme)
+        # UI settings
+        u = settings_manager.get("theme")
+        self.check_dark.setChecked(u == "dark")
 
-        # STT
-        stt = settings.get("stt", {})
-        self.cb_model.setCurrentText(stt.get("model", "ggml-medium-q5_0.bin"))
-        self.cb_lang.setCurrentText(stt.get("language", "ko"))
-        self.sb_threads.setValue(stt.get("threads", 4))
-        self.db_temp.setValue(stt.get("temperature", 0.0))
-
-        # Diarization
-        dia = settings.get("diarization", {})
-        self.db_margin.setValue(dia.get("margin", 0.5))
-
-    def save_settings(self):
-        settings_manager.settings["theme"] = self.cb_theme.currentText()
+    def save_to_json(self):
+        settings_manager.settings["stt"]["model"] = self.combo_model.currentText()
+        settings_manager.settings["stt"]["language"] = self.combo_lang.currentText()
+        settings_manager.settings["stt"]["threads"] = self.spin_threads.value()
+        settings_manager.settings["theme"] = "dark" if self.check_dark.isChecked() else "light"
         
-        if "stt" not in settings_manager.settings:
-            settings_manager.settings["stt"] = {}
-        settings_manager.settings["stt"]["model"] = self.cb_model.currentText()
-        settings_manager.settings["stt"]["language"] = self.cb_lang.currentText()
-        settings_manager.settings["stt"]["threads"] = self.sb_threads.value()
-        settings_manager.settings["stt"]["temperature"] = self.db_temp.value()
-
-        if "diarization" not in settings_manager.settings:
-            settings_manager.settings["diarization"] = {}
-        settings_manager.settings["diarization"]["margin"] = self.db_margin.value()
-
-        settings_manager.save_settings()
+        settings_manager.save()
         QMessageBox.information(self, "저장 완료", "설정이 settings.json에 저장되었습니다.")
