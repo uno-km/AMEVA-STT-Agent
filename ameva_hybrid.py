@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 
-SCRIPT_VERSION = "v1.2"
+SCRIPT_VERSION = "v1.3"
 SCRIPT_MODIFIED = "2026-05-04"
 
 # ==========================================
@@ -644,7 +644,10 @@ def main():
         print("[SYSTEM] 한국어 강제 인식 모드가 활성화되었습니다.")
 
     # 3. Whisper 실행
-    subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        print(f"[ERROR] Whisper 실행 실패: {result.stderr}")
+        sys.exit(1)
 
     # 4. 결과 JSON 파일 경로 정의 (이 줄이 빠져서 에러가 났던 겁니다!)
     whisper_json_file = env_manager.audio_file + ".json"
