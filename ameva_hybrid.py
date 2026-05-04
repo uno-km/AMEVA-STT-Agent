@@ -19,6 +19,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 
+SCRIPT_VERSION = "v1.0"
+SCRIPT_MODIFIED = "2026-05-04"
+
 # ==========================================
 # 지능형 환경 진단 및 데이터 사이언스 모듈 (Intelligent Environment Diagnosis & Data Science Module)
 # ==========================================
@@ -548,6 +551,8 @@ def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coo
 # 3. 메인 프로세스 (Main Execution)
 # ==========================================
 def main():
+    print(f"[SYSTEM] AMEVA Hybrid STT Engine 시작 - 버전 {SCRIPT_VERSION} / 최종 수정일 {SCRIPT_MODIFIED}")
+
     # 환경 초기화
     env_manager = EnvironmentManager()
     
@@ -573,6 +578,8 @@ def main():
     parser.add_argument("--max_offset", type=float, default=3.0, help="매핑 허용 최대 오차 시간(초) (기본값: 3.0)")
     parser.add_argument("--output", type=str, default="ameva_result", help="결과 출력 파일 접두사 (예: ameva_result)")
     parser.add_argument("-ko", "--ko", dest="ko", action="store_true", help="한국어(Korean) 위스퍼 모드 발동 (-l ko)")
+    parser.add_argument("--whisper_max_len", type=int, default=500, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준, 시간 단위 아님)")
+    parser.add_argument("--whisper_split_on_word", action="store_true", help="Whisper.cpp -sow 옵션 사용: 단어 경계 기준 분리 (기본값: 사용 안 함)")
     
     args = parser.parse_args()
 
@@ -613,13 +620,14 @@ def main():
     
     # 1. 실행 명령어 리스트 구성
     whisper_args = [
-        env_manager.whisper_cmd, 
-        "-m", active_whisper_model, 
-        "-f", env_manager.audio_file, 
-        "-ml", "500",    # 문장 최대 길이를 제한 (밀리초 단위 아님, 글자수/토큰 기준 유동적)
-        "-sow",          # 문장 단위로 더 정밀하게 분리 시도
+        env_manager.whisper_cmd,
+        "-m", active_whisper_model,
+        "-f", env_manager.audio_file,
+        "-ml", str(args.whisper_max_len),  # 최대 문장 길이: 문자/토큰 기준, 시간(초) 기준 아님
         "-oj", "-nt"
     ]
+    if args.whisper_split_on_word:
+        whisper_args.append("-sow")  # 단어 경계 기준 분리: 더 짧은 세그먼트를 만들 수 있음
 
     # 2. 사용자가 --ko 옵션을 넣었다면 한국어 옵션(-l ko) 추가
     if args.ko:
