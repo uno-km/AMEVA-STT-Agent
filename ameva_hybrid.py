@@ -167,18 +167,18 @@ def main():
     phase1_start = time.time()
     
     whisper_args = [
-        WHISPER_CMD, 
-        "-m", active_whisper_model, 
-        "-f", AUDIO_FILE, 
-        "-oj", "-nt"
-    ]
+        WHISPER_CMD, 
+        "-m", active_whisper_model, 
+        "-f", AUDIO_FILE, 
+        "-oj", "-nt"
+    ]
 
-    # 사용자가 --ko 옵션을 넣었다면 리스트에 추가!
-    if args.ko:
-        whisper_args.extend(["-l", "ko"])
-        print("[SYSTEM] 한국어 강제 인식 모드가 활성화되었습니다.")
+    # 사용자가 --ko 옵션을 넣었다면 리스트에 추가!
+    if args.ko:
+        whisper_args.extend(["-l", "ko"])
+        print("[SYSTEM] 한국어 강제 인식 모드가 활성화되었습니다.")
 
-    subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     with open(whisper_json_file, "r", encoding="utf-8") as f:
         whisper_data = json.load(f)
