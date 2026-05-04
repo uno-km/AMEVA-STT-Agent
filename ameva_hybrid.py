@@ -167,17 +167,19 @@ def main():
     print("\n[Phase 1] Whisper.cpp 전사 작업 수행 중...")
     phase1_start = time.time()
     
-    subprocess.run([
-        WHISPER_CMD, 
-        "-m", active_whisper_model, 
-        "-f", AUDIO_FILE, 
-        "-oj", "-nt"
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    whisper_args = [
+        WHISPER_CMD, 
+        "-m", active_whisper_model, 
+        "-f", AUDIO_FILE, 
+        "-oj", "-nt"
+    ]
 
-    whisper_json_file = AUDIO_FILE + ".json"
-    if not os.path.exists(whisper_json_file):
-        print("[ERROR] Whisper JSON 결과물을 찾을 수 없습니다.")
-        sys.exit(1)
+    # 사용자가 --ko 옵션을 넣었다면 리스트에 추가!
+    if args.ko:
+        whisper_args.extend(["-l", "ko"])
+        print("[SYSTEM] 한국어 강제 인식 모드가 활성화되었습니다.")
+
+    subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     with open(whisper_json_file, "r", encoding="utf-8") as f:
         whisper_data = json.load(f)
