@@ -142,6 +142,7 @@ def main():
     parser.add_argument("--speakers", type=int, default=2, help="오디오 내 예상 화자 수 지정 (기본값: 2)")
     parser.add_argument("--max_offset", type=float, default=3.0, help="매핑 허용 최대 오차 시간(초) (기본값: 3.0)")
     parser.add_argument("--output", type=str, default="ameva_result", help="결과 출력 파일 접두사 (예: ameva_result)")
+    parser.add_argument("-ko", "--ko", dest="ko", action="store_true", help="한국어(Korean) 위스퍼 모드 발동 (-l ko)")
     
     args = parser.parse_args()
 
