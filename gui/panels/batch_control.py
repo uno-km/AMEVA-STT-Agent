@@ -10,6 +10,7 @@ from src.core.settings_manager import settings_manager
 
 class BatchControlPanel(QWidget):
     run_requested = pyqtSignal()
+    file_clicked = pyqtSignal(str) # 파일 클릭 신호 추가
 
     def __init__(self):
         super().__init__()
@@ -101,6 +102,7 @@ class BatchControlPanel(QWidget):
             QTableWidget { background-color: #1a1b26; gridline-color: #2e3c43; font-size: 11px; }
             QHeaderView::section { background-color: #2e3c43; color: white; padding: 4px; border: none; }
         """)
+        self.table.itemClicked.connect(self.on_item_clicked) # 클릭 이벤트 연결
         layout.addWidget(self.table)
         
         self.refresh_log()
@@ -163,3 +165,8 @@ class BatchControlPanel(QWidget):
                     self.table.setItem(i, 3, QTableWidgetItem(f"{row.get('duration', '0')}s"))
         except:
             pass
+
+    def on_item_clicked(self, item):
+        row = item.row()
+        file_name = self.table.item(row, 1).text()
+        self.file_clicked.emit(file_name)

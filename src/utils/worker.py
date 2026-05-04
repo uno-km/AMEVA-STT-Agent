@@ -59,15 +59,15 @@ class PipelineWorker(QThread):
             start_ts = time.time()
             
             try:
-                # Execute Pipeline
-                final_json_path, embeddings, labels = pipeline.execute(
+                # Execute Pipeline (4개 값 반환: json_path, embeddings, labels, cluster_db_path)
+                final_json_path, embeddings, labels, cluster_db_path = pipeline.execute(
                     full_path, 
                     self.output_dir, 
                     logger_callback=lambda msg: self.log_signal.emit(msg)
                 )
                 
                 duration = time.time() - start_ts
-                self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS")
+                self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS", "", cluster_db_path)
                 
                 # Update UI
                 self.chart_signal.emit(embeddings, labels)
@@ -95,11 +95,11 @@ class PipelineWorker(QThread):
             pass
         return processed
 
-    def log_batch_result(self, original_filename, output_filename, batch_id, duration, status, error=""):
+    def log_batch_result(self, original_filename, output_filename, batch_id, duration, status, error="", cluster_db_path=""):
         file_exists = os.path.exists(self.db_file)
         fieldnames = [
             "timestamp", "original_filename", "output_filename", 
-            "batch_id", "duration", "status", "error"
+            "batch_id", "duration", "status", "error", "cluster_db_path"
         ]
         
         with open(self.db_file, "a", encoding="utf-8", newline="") as f:
@@ -113,7 +113,8 @@ class PipelineWorker(QThread):
                 "batch_id": batch_id,
                 "duration": f"{duration:.2f}",
                 "status": status,
-                "error": error
+                "error": error,
+                "cluster_db_path": cluster_db_path
             })
         
         if error:

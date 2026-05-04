@@ -26,8 +26,11 @@ class MainWindow(QMainWindow):
         theme = settings_manager.get("theme")
         self.apply_theme(theme if isinstance(theme, str) else "dark")
         
-        # 설정 변경 감지 시 테마 업데이트
+        # 설정 변경 감지 시 테마 업데이트 및 시스템 로그 기록
         settings_manager.settings_changed.connect(lambda s: self.apply_theme(s.get("theme", "dark")))
+        settings_manager.settings_changed.connect(lambda: self.p_log.append_system_log("⚙️ 시스템 설정이 변경되어 저장되었습니다."))
+        
+        self.p_log.append_system_log("🚀 AMEVA Hybrid STT Dashboard 가동 준비 완료")
 
     def init_ui(self):
         central = QWidget()
@@ -89,6 +92,47 @@ class MainWindow(QMainWindow):
         # 배치 실행 버튼 및 자동 타이머 신호 연결
         self.p_batch.btn_run_batch.clicked.connect(self.start_pipeline)
         self.p_batch.run_requested.connect(self.start_pipeline)
+        
+        # 모델 다운로드 로그 -> SYSTEM 탭 연결
+        self.p_settings.download_log_signal.connect(self.p_log.append_system_log)
+        
+        # 최근 이력 클릭 시 군집화 데이터 로드
+        self.p_batch.file_clicked.connect(self.load_clustering_from_history)
+
+    def load_clustering_from_history(self, file_name):
+        import json
+        import numpy as np
+        import csv
+        
+        db_file = settings_manager.get("batch").get("db_file", "stt_batch_log.csv")
+        cluster_file = None
+        
+        # 1. Master CSV에서 경로 찾기
+        if os.path.exists(db_file):
+            try:
+                with open(db_file, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if os.path.basename(row.get("original_filename", "")) == file_name:
+                            cluster_file = row.get("cluster_db_path")
+                            # 가장 최신 기록을 사용하기 위해 계속 루프 (혹은 루프 탈출)
+            except:
+                pass
+
+        # 2. 데이터 로드 및 시각화
+        if cluster_file and os.path.exists(cluster_file):
+            try:
+                with open(cluster_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    embeddings = np.array(data["embeddings"])
+                    labels = data["labels"]
+                    self.p_log.update_chart(embeddings, labels)
+                    self.p_log.tabs.setCurrentIndex(2) 
+                    self.p_log.append_system_log(f"📊 [{file_name}]의 DB 데이터를 복원했습니다. (Path: {os.path.basename(cluster_file)})")
+            except Exception as e:
+                self.p_log.append_system_log(f"❌ DB 로드 실패: {str(e)}")
+        else:
+            self.p_log.append_system_log(f"⚠️ 매핑된 군집화 DB 정보를 찾을 수 없습니다: {file_name}")
 
     def start_pipeline(self):
         if self.worker and self.worker.isRunning():

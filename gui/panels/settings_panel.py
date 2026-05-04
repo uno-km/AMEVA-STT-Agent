@@ -1,13 +1,19 @@
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, 
-    QPushButton, QLabel, QCheckBox, QSpinBox, QMessageBox, QFrame
+    QPushButton, QLabel, QCheckBox, QSpinBox, QMessageBox, QFrame,
+    QHBoxLayout, QProgressBar
 )
+from PyQt6.QtCore import pyqtSignal
 from src.core.settings_manager import settings_manager
+from src.utils.downloader import ModelDownloader
 
 class SettingsPanel(QWidget):
+    download_log_signal = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
+        self.downloader = None
         self.init_ui()
         self.load_from_json()
 
@@ -36,8 +42,20 @@ class SettingsPanel(QWidget):
         form.addRow(model_label)
 
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["small", "medium", "turbo", "large-v3"])
-        form.addRow("Whisper 모델:", self.combo_model)
+        self.btn_download = QPushButton("📥 다운로드")
+        self.btn_download.setFixedWidth(100)
+        self.btn_download.clicked.connect(self.start_download)
+        
+        model_layout = QHBoxLayout()
+        model_layout.addWidget(self.combo_model)
+        model_layout.addWidget(self.btn_download)
+        form.addRow("Whisper 모델:", model_layout)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #88c0d0; }")
+        form.addRow("", self.progress_bar)
 
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["ko", "en", "ja", "zh", "auto"])
@@ -96,17 +114,22 @@ class SettingsPanel(QWidget):
 
     def update_model_list(self):
         self.combo_model.clear()
-        base_dir = r"C:\ameva\AI_Models\faster-whisper"
-        models = ["small", "medium", "turbo", "large-v3"]
+        base_dir = r"C:\ameva\AI_Models\ggml"
+        models = ["small", "medium", "turbo", "large"]
         
         for m in models:
-            # HuggingFace 캐시 폴더 패턴 확인
-            folder_name = f"models--Systran--faster-whisper-{m}"
-            if m == "turbo": folder_name = "models--Systran--faster-whisper-large-v3-turbo"
+            # GGML 파일명 패턴 확인 (양자화 버전 포함 검색)
+            base_filename = f"ggml-{m}"
+            if m == "turbo": base_filename = "ggml-large-v3-turbo"
+            elif m == "large": base_filename = "ggml-large-v3"
             
             exists = False
-            if os.path.exists(os.path.join(base_dir, folder_name)):
-                exists = True
+            # 폴더 내의 파일들을 뒤져서 해당 모델명이 포함된 .bin 파일이 있는지 확인
+            if os.path.exists(base_dir):
+                for f in os.listdir(base_dir):
+                    if f.startswith(base_filename) and f.endswith(".bin") and os.path.getsize(os.path.join(base_dir, f)) > 1024*1024:
+                        exists = True
+                        break
             
             display_text = f"{m} {'✅' if exists else '❌'}"
             self.combo_model.addItem(display_text, m)
@@ -122,3 +145,35 @@ class SettingsPanel(QWidget):
         settings_manager.save()
         QMessageBox.information(self, "저장 완료", "설정이 성공적으로 저장되었습니다.")
         self.update_model_list() # 상태 새로고침
+
+    def start_download(self):
+        # 실제 모델명만 추출
+        model_name = self.combo_model.currentData()
+        if not model_name:
+            model_name = self.combo_model.currentText().split()[0]
+            
+        base_dir = r"C:\ameva\AI_Models\ggml"
+        
+        self.downloader = ModelDownloader(model_name, base_dir)
+        self.downloader.progress_signal.connect(self.progress_bar.setValue)
+        self.downloader.log_signal.connect(self.download_log_signal.emit)
+        self.downloader.finished_signal.connect(self.on_download_finished)
+        
+        self.btn_download.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.downloader.start()
+
+    def on_download_finished(self, success):
+        self.btn_download.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        if success:
+            self.update_model_list()
+            # 콤보박스 선택 유지
+            for i in range(self.combo_model.count()):
+                if self.downloader.model_name in self.combo_model.itemText(i):
+                    self.combo_model.setCurrentIndex(i)
+                    break
+            QMessageBox.information(self, "다운로드 완료", f"{self.downloader.model_name} 모델이 설치되었습니다.")
+        else:
+            QMessageBox.warning(self, "다운로드 실패", "모델 다운로드 중 오류가 발생했습니다.")
