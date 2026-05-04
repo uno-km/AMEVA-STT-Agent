@@ -3,27 +3,34 @@ import csv
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, 
     QPushButton, QHBoxLayout, QLabel, QSpinBox, QFileDialog,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFrame
+    QTableWidget, QTableWidgetItem, QHeaderView, QFrame, QCheckBox
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from src.core.settings_manager import settings_manager
 
 class BatchControlPanel(QWidget):
+    run_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.init_ui()
         self.load_paths()
         
         # 주기적으로 로그 새로고침
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.refresh_log)
-        self.timer.start(5000) # 5초마다
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.refresh_log)
+        self.refresh_timer.start(5000)
+
+        # 자동 실행 타이머
+        self.auto_timer = QTimer(self)
+        self.auto_timer.timeout.connect(self.on_auto_timer_timeout)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(15, 15, 15, 15)
 
         title = QLabel("⏱️ 배치 관리자")
+        title.setObjectName("title")
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffcb6b; margin-bottom: 10px;")
         layout.addWidget(title)
 
@@ -54,6 +61,11 @@ class BatchControlPanel(QWidget):
         self.spin_interval.setSuffix(" 분")
         form.addRow("자동 주기:", self.spin_interval)
 
+        self.check_auto = QCheckBox("자동 모드 활성화 (스케줄러)")
+        self.check_auto.setStyleSheet("color: #a3be8c; font-weight: bold; margin-top: 5px;")
+        self.check_auto.stateChanged.connect(self.toggle_auto_mode)
+        form.addRow("", self.check_auto)
+
         layout.addLayout(form)
 
         # 버튼 영역
@@ -63,6 +75,7 @@ class BatchControlPanel(QWidget):
         self.btn_save_path.clicked.connect(self.save_paths)
         
         self.btn_run_batch = QPushButton("🚀 배치 실행")
+        self.btn_run_batch.setObjectName("btn_run_batch")
         self.btn_run_batch.setStyleSheet("background-color: #bf616a; padding: 10px; font-weight: bold;")
         
         btn_layout.addWidget(self.btn_save_path)
@@ -103,12 +116,30 @@ class BatchControlPanel(QWidget):
         self.line_input.setText(b.get("input_dir", ""))
         self.line_output.setText(b.get("output_dir", ""))
         self.spin_interval.setValue(b.get("interval_min", 60))
+        self.check_auto.setChecked(b.get("auto_mode", False))
+        # 초기 상태에 따라 타이머 설정
+        if self.check_auto.isChecked():
+            self.toggle_auto_mode()
 
     def save_paths(self):
         settings_manager.settings["batch"]["input_dir"] = self.line_input.text()
         settings_manager.settings["batch"]["output_dir"] = self.line_output.text()
         settings_manager.settings["batch"]["interval_min"] = self.spin_interval.value()
+        settings_manager.settings["batch"]["auto_mode"] = self.check_auto.isChecked()
         settings_manager.save()
+        self.toggle_auto_mode() # 타이머 갱신
+
+    def toggle_auto_mode(self):
+        if self.check_auto.isChecked():
+            interval_ms = self.spin_interval.value() * 60 * 1000
+            self.auto_timer.start(interval_ms)
+            self.run_requested.emit() # 즉시 한 번 실행
+        else:
+            self.auto_timer.stop()
+
+    def on_auto_timer_timeout(self):
+        if self.check_auto.isChecked():
+            self.run_requested.emit()
 
     def refresh_log(self):
         db_file = settings_manager.get("batch").get("db_file", "stt_batch_log.csv")

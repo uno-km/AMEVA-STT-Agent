@@ -3,8 +3,6 @@ matplotlib
 numpy
 scipy
 scikit-learn
-torch --index-url https://download.pytorch.org/whl/cpu
-torchaudio --index-url https://download.pytorch.org/whl/cpu
-faster-whisper
-vosk
-requests
+pywhispercpp
+torch
+torchaudio

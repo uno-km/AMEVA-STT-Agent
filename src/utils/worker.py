@@ -41,14 +41,18 @@ class PipelineWorker(QThread):
                     audio_files.append((rel_path, os.path.join(root, fname)))
         
         if not audio_files:
-            self.log_signal.emit("⚠️ 처리할 오디오 파일이 없습니다.")
+            self.log_signal.emit("⚠️ 입력 폴더에 지원되는 오디오 파일이 하나도 없습니다.")
             return
 
         # 2. Load DB and filter
         processed_files = self.load_processed_files()
         work_queue = [f for f in audio_files if f[0] not in processed_files]
         
-        self.log_signal.emit(f"[*] 총 {len(audio_files)}개 중 {len(work_queue)}개 신규 파일 처리 예정")
+        if not work_queue:
+            self.log_signal.emit(f"✅ 모든 파일({len(audio_files)}개)이 이미 처리되었습니다. 새로 분석할 파일이 없습니다.")
+            return
+
+        self.log_signal.emit(f"[*] 총 {len(audio_files)}개 파일 발견 -> {len(work_queue)}개 신규 파일 분석 시작")
 
         for rel_path, full_path in work_queue:
             self.log_signal.emit(f"\n[Processing] {rel_path} ...")

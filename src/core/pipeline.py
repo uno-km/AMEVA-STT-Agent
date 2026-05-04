@@ -3,6 +3,7 @@ import os
 import time
 import json
 import numpy as np
+import subprocess
 from faster_whisper import WhisperModel
 from src.core.settings_manager import settings_manager
 
@@ -58,6 +59,29 @@ class STTPipeline:
     def __init__(self):
         pass
 
+    def convert_to_wav(self, input_path, log_callback=None):
+        """
+        비 WAV 파일을 16kHz Mono WAV로 변환합니다. (Vosk 및 STT 최적화)
+        """
+        if input_path.lower().endswith(".wav"):
+            return input_path
+
+        output_path = os.path.splitext(input_path)[0] + "_converted.wav"
+        if log_callback: log_callback(f"[Pipeline] 변환 중: {os.path.basename(input_path)} -> wav")
+        
+        try:
+            # ffmpeg -y -i input -ar 16000 -ac 1 output
+            command = [
+                "ffmpeg", "-y", "-i", input_path,
+                "-ar", "16000", "-ac", "1",
+                output_path
+            ]
+            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return output_path
+        except Exception as e:
+            if log_callback: log_callback(f"[Error] 변환 실패: {str(e)}")
+            return input_path
+
     def execute(self, audio_path, output_dir, logger_callback=None):
         """
         Multiprocessing을 통해 STT와 Diarization을 병렬로 돌리고 Phase 3에서 병합합니다.
@@ -66,6 +90,9 @@ class STTPipeline:
             if logger_callback: logger_callback(msg)
             
         log(f"[Pipeline] 파일 병렬 분석 준비 중: {audio_path}")
+        
+        # Phase 0: 오디오 전처리 (WAV 변환)
+        processed_audio = self.convert_to_wav(audio_path, log)
         
         # 설정 불러오기
         stt_config = settings_manager.get("stt")
@@ -78,8 +105,8 @@ class STTPipeline:
         q = manager.Queue()
         
         # 프로세스 생성
-        p_stt = multiprocessing.Process(target=worker_stt, args=(audio_path, model_size, language, threads, q))
-        p_dia = multiprocessing.Process(target=worker_diarization, args=(audio_path, q))
+        p_stt = multiprocessing.Process(target=worker_stt, args=(processed_audio, model_size, language, threads, q))
+        p_dia = multiprocessing.Process(target=worker_diarization, args=(processed_audio, q))
         
         # 동시 시작
         p_stt.start()

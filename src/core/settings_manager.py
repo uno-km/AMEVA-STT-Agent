@@ -17,9 +17,10 @@ class SettingsManager(QObject):
                 "threads": 4
             },
             "batch": {
-                "input_dir": r"C:\ameva\input_audios",
-                "output_dir": r"C:\ameva\output_results",
-                "interval_min": 60,
+                "input_dir": r"C:\ameva\AMEVA-STT-Agent\input_audios",
+                "output_dir": r"C:\ameva\AMEVA-STT-Agent\output_results",
+                "interval_min": 1,
+                "auto_mode": False,
                 "db_file": "stt_batch_log.csv",
                 "exception_db_file": "stt_exception_log.csv"
             },

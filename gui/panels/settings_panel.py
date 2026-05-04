@@ -16,6 +16,7 @@ class SettingsPanel(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
 
         title = QLabel("⚙️ 시스템 설정")
+        title.setObjectName("title")
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #82aaff; margin-bottom: 10px;")
         layout.addWidget(title)
 
@@ -76,19 +77,48 @@ class SettingsPanel(QWidget):
         layout.addWidget(self.btn_save)
 
     def load_from_json(self):
+        # 모델 상태 체크 및 콤보박스 업데이트
+        self.update_model_list()
+        
         s = settings_manager.get("stt")
-        self.combo_model.setCurrentText(s.get("model", "medium"))
+        current_model = s.get("model", "medium")
+        # 상태 표시가 포함된 텍스트에서 매칭되는 항목 찾기
+        for i in range(self.combo_model.count()):
+            if current_model in self.combo_model.itemText(i):
+                self.combo_model.setCurrentIndex(i)
+                break
+        
         self.combo_lang.setCurrentText(s.get("language", "ko"))
         self.spin_threads.setValue(s.get("threads", 4))
         
         theme = settings_manager.get("theme")
         self.check_dark.setChecked(theme == "dark")
 
+    def update_model_list(self):
+        self.combo_model.clear()
+        base_dir = r"C:\ameva\AI_Models\faster-whisper"
+        models = ["small", "medium", "turbo", "large-v3"]
+        
+        for m in models:
+            # HuggingFace 캐시 폴더 패턴 확인
+            folder_name = f"models--Systran--faster-whisper-{m}"
+            if m == "turbo": folder_name = "models--Systran--faster-whisper-large-v3-turbo"
+            
+            exists = False
+            if os.path.exists(os.path.join(base_dir, folder_name)):
+                exists = True
+            
+            display_text = f"{m} {'✅' if exists else '❌'}"
+            self.combo_model.addItem(display_text, m)
+
     def save_to_json(self):
-        settings_manager.settings["stt"]["model"] = self.combo_model.currentText()
+        # 실제 모델명만 추출 (✅ ❌ 제외)
+        selected_text = self.combo_model.currentText().split()[0]
+        settings_manager.settings["stt"]["model"] = selected_text
         settings_manager.settings["stt"]["language"] = self.combo_lang.currentText()
         settings_manager.settings["stt"]["threads"] = self.spin_threads.value()
         settings_manager.settings["theme"] = "dark" if self.check_dark.isChecked() else "light"
         
         settings_manager.save()
         QMessageBox.information(self, "저장 완료", "설정이 성공적으로 저장되었습니다.")
+        self.update_model_list() # 상태 새로고침

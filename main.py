@@ -1,6 +1,11 @@
 import sys
+import os
 import traceback
 import multiprocessing
+
+# Silence HuggingFace Hub warnings
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["PYTHONWARNINGS"] = "ignore"
 
 def main():
     try:

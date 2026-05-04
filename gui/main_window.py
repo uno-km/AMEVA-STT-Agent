@@ -19,9 +19,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AMEVA Hybrid STT Dashboard v2.5 - Expert Edition")
         self.resize(1700, 950)
+        self.worker = None
         
         self.init_ui()
-        self.apply_styles()
+        # 초기 테마 적용
+        theme = settings_manager.get("theme")
+        self.apply_theme(theme if isinstance(theme, str) else "dark")
+        
+        # 설정 변경 감지 시 테마 업데이트
+        settings_manager.settings_changed.connect(lambda s: self.apply_theme(s.get("theme", "dark")))
 
     def init_ui(self):
         central = QWidget()
@@ -80,10 +86,15 @@ class MainWindow(QMainWindow):
         # 익스플로러에서 파일 선택 시 뷰어에 표시
         self.p_explorer.file_selected.connect(self.p_viewer.open_file_in_tab)
         
-        # 배치 실행 버튼 클릭 시
+        # 배치 실행 버튼 및 자동 타이머 신호 연결
         self.p_batch.btn_run_batch.clicked.connect(self.start_pipeline)
+        self.p_batch.run_requested.connect(self.start_pipeline)
 
     def start_pipeline(self):
+        if self.worker and self.worker.isRunning():
+            self.p_log.append_log("⚠️ 이미 분석 작업이 진행 중입니다. 현재 작업 완료 후 다음 주기에 시작합니다.")
+            return
+
         input_dir = self.p_batch.line_input.text()
         output_dir = self.p_batch.line_output.text()
         
@@ -97,26 +108,108 @@ class MainWindow(QMainWindow):
         
         self.worker.start()
 
-    def apply_styles(self):
-        self.setStyleSheet("""
-            QMainWindow { background-color: #0f111a; }
-            QSplitter::handle { background-color: #2e3c43; }
-            QSplitter::handle:horizontal { width: 2px; }
-            QSplitter::handle:vertical { height: 2px; }
-            QWidget { color: #d1d4e0; font-family: 'Segoe UI', 'Malgun Gothic'; }
-            QPushButton { 
-                background-color: #3b4252; 
-                border: 1px solid #4c566a; 
-                border-radius: 4px; 
-                padding: 5px; 
-                color: white; 
-            }
-            QPushButton:hover { background-color: #4c566a; border: 1px solid #82aaff; }
-            QLineEdit, QSpinBox, QComboBox { 
-                background-color: #1a1b26; 
-                border: 1px solid #2e3c43; 
-                padding: 4px; 
-                border-radius: 3px; 
-                color: #d1d4e0; 
-            }
-        """)
+    def apply_theme(self, theme_name):
+        if theme_name == "light":
+            self.setStyleSheet("""
+                QMainWindow, QWidget { background-color: #ffffff; color: #24292f; font-family: 'Segoe UI', 'Malgun Gothic'; }
+                QSplitter::handle { background-color: #d0d7de; }
+                
+                /* Buttons */
+                QPushButton { 
+                    background-color: #f6f8fa; 
+                    border: 1px solid #d0d7de; 
+                    border-radius: 6px; 
+                    padding: 6px 12px; 
+                    color: #24292f; 
+                    font-weight: 500;
+                }
+                QPushButton:hover { background-color: #f3f4f6; border-color: #0969da; }
+                QPushButton#btn_run_batch { background-color: #2da44e; color: white; border: none; }
+                QPushButton#btn_run_batch:hover { background-color: #2c974b; }
+
+                /* Inputs */
+                QLineEdit, QSpinBox, QComboBox { 
+                    background-color: #ffffff; 
+                    border: 1px solid #d0d7de; 
+                    padding: 5px; 
+                    border-radius: 6px; 
+                    color: #24292f; 
+                }
+                QLineEdit:focus { border: 2px solid #0969da; }
+
+                /* Panels specific styles */
+                QTextEdit, QTextBrowser { 
+                    background-color: #f6f8fa; 
+                    border: 1px solid #d0d7de; 
+                    border-radius: 6px; 
+                    color: #24292f; 
+                    font-family: 'Consolas', monospace;
+                }
+                QTreeView { 
+                    background-color: #ffffff; 
+                    border: none; 
+                    color: #24292f;
+                }
+                QTreeView::item:selected { background-color: #ddf4ff; color: #0969da; }
+                
+                QHeaderView::section { background-color: #f6f8fa; color: #57606a; padding: 4px; border: none; font-weight: bold; }
+                
+                QTableWidget { 
+                    background-color: #ffffff; 
+                    gridline-color: #d0d7de; 
+                    border: 1px solid #d0d7de;
+                }
+                
+                /* Tabs */
+                QTabWidget::pane { border: 1px solid #d0d7de; top: -1px; background-color: #ffffff; }
+                QTabBar::tab { 
+                    background: #f6f8fa; 
+                    border: 1px solid #d0d7de; 
+                    border-bottom-color: transparent; 
+                    border-top-left-radius: 6px; 
+                    border-top-right-radius: 6px; 
+                    padding: 8px 16px; 
+                    margin-right: 2px;
+                    color: #57606a;
+                }
+                QTabBar::tab:selected { background: #ffffff; color: #24292f; font-weight: bold; border-bottom-color: #ffffff; }
+                
+                QLabel#title { color: #0969da; }
+            """)
+        else:
+            self.setStyleSheet("""
+                QMainWindow, QWidget { background-color: #0f111a; color: #d1d4e0; font-family: 'Segoe UI', 'Malgun Gothic'; }
+                QSplitter::handle { background-color: #2e3c43; }
+                
+                QPushButton { 
+                    background-color: #3b4252; 
+                    border: 1px solid #4c566a; 
+                    border-radius: 4px; 
+                    padding: 5px; 
+                    color: white; 
+                }
+                QPushButton:hover { background-color: #4c566a; border: 1px solid #82aaff; }
+                
+                QLineEdit, QSpinBox, QComboBox { 
+                    background-color: #1a1b26; 
+                    border: 1px solid #2e3c43; 
+                    padding: 4px; 
+                    border-radius: 3px; 
+                    color: #d1d4e0; 
+                }
+                
+                QTextEdit, QTextBrowser { 
+                    background-color: #1a1b26; 
+                    color: #d1d4e0; 
+                    border: 1px solid #2e3c43;
+                }
+                
+                QTabWidget::pane { border: 1px solid #2e3c43; }
+                QTabBar::tab { background: #2e3c43; padding: 8px; margin: 2px; border-radius: 4px; }
+                QTabBar::tab:selected { background: #3b4252; border: 1px solid #82aaff; }
+                
+                QTreeView { background-color: #1a1b26; border: none; color: #d1d4e0; }
+                QHeaderView::section { background-color: #2e3c43; color: white; }
+                QTableWidget { background-color: #1a1b26; gridline-color: #2e3c43; }
+            """)
+
