@@ -10,7 +10,11 @@ import subprocess
 import time
 import argparse
 import random
+import csv
+from datetime import datetime
 from vosk import Model, SpkModel, KaldiRecognizer
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
@@ -40,12 +44,16 @@ def compute_mean_vector(vectors):
     return [sum(col) / len(col) for col in zip(*vectors)]
 
 def kmeans_clustering_k(vectors, k=2, max_iter=10):
-    if not vectors: 
-        return []
+    if not vectors:
+        return [], []
     num_vectors = len(vectors)
     
     if num_vectors <= k:
-        return list(range(num_vectors))
+        labels = list(range(num_vectors))
+        centroids = vectors.copy()
+        while len(centroids) < k:
+            centroids.append(vectors[0])
+        return labels, centroids
 
     centroids = random.sample(vectors, k)
     labels = []
@@ -65,10 +73,100 @@ def kmeans_clustering_k(vectors, k=2, max_iter=10):
             if clusters[i]:
                 centroids[i] = compute_mean_vector(clusters[i])
                 
-    return labels
+    return labels, centroids
 
 
-def save_visualization(whisper_segments, vosk_speakers, output_prefix="ameva_result"):
+def pca_2d(vectors):
+    if not vectors:
+        return [], None
+    try:
+        import numpy as np
+        X = np.array(vectors, dtype=float)
+        mean = X.mean(axis=0)
+        Xc = X - mean
+        u, s, vt = np.linalg.svd(Xc, full_matrices=False)
+        components = vt[:2]
+        coords = (Xc @ components.T).tolist()
+        return coords, {"mean": mean.tolist(), "components": components.tolist()}
+    except Exception:
+        dim = len(vectors[0])
+        n = len(vectors)
+        mean = [sum(v[i] for v in vectors) / n for i in range(dim)]
+        data = [[v[i] - mean[i] for i in range(dim)] for v in vectors]
+        cov = [[0.0] * dim for _ in range(dim)]
+        denom = max(n - 1, 1)
+        for i in range(dim):
+            for j in range(i, dim):
+                s = sum(row[i] * row[j] for row in data) / denom
+                cov[i][j] = s
+                cov[j][i] = s
+
+        def matvec(mat, vec):
+            return [sum(mat[i][j] * vec[j] for j in range(dim)) for i in range(dim)]
+
+        def norm(vec):
+            return math.sqrt(sum(x * x for x in vec))
+
+        def power_iteration(matrix):
+            vec = [random.random() for _ in range(dim)]
+            length = norm(vec)
+            if length == 0:
+                vec = [1.0] + [0.0] * (dim - 1)
+            else:
+                vec = [x / length for x in vec]
+            for _ in range(40):
+                mv = matvec(matrix, vec)
+                norm_mv = norm(mv)
+                if norm_mv == 0:
+                    break
+                vec = [x / norm_mv for x in mv]
+            eigenvalue = sum(vec[i] * matvec(matrix, vec)[i] for i in range(dim))
+            return vec, eigenvalue
+
+        v1, lam1 = power_iteration(cov)
+        for i in range(dim):
+            for j in range(dim):
+                cov[i][j] -= lam1 * v1[i] * v1[j]
+        v2, _ = power_iteration(cov)
+        coords = []
+        for row in data:
+            x = sum(row[i] * v1[i] for i in range(dim))
+            y = sum(row[i] * v2[i] for i in range(dim))
+            coords.append([x, y])
+        return coords, {"mean": mean, "components": [v1, v2]}
+
+
+def project_vectors(vectors, transform):
+    if not vectors or transform is None:
+        return []
+    mean = transform["mean"]
+    comps = transform["components"]
+    return [[sum((vec[i] - mean[i]) * comps[j][i] for i in range(len(vec))) for j in range(2)] for vec in vectors]
+
+
+def create_output_prefix(base_name, args, model_name):
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    return f"{base_name}_{ts}_sp{args.speakers}_mo{args.max_offset}_{model_name}"
+
+
+def write_csv_log(whisper_segments, csv_path):
+    fieldnames = ["start", "end", "speaker_id", "matched", "time_offset", "confidence", "text"]
+    with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for seg in whisper_segments:
+            writer.writerow({
+                "start": seg.get("start", ""),
+                "end": seg.get("end", ""),
+                "speaker_id": seg.get("speaker_id", "Unknown"),
+                "matched": bool(seg.get("matched", False)),
+                "time_offset": seg.get("time_offset", ""),
+                "confidence": round(seg.get("confidence", 0.0), 4),
+                "text": seg.get("text", "").replace("\n", " ")
+            })
+
+
+def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix="ameva_result"):
     # Build speaker id list (exclude unknown -1)
     speaker_ids = sorted({v.get('speaker_id', -1) for v in vosk_speakers if v.get('speaker_id', -1) != -1})
     if not speaker_ids:
