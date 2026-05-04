@@ -17,19 +17,245 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.lines import Line2D
 
 # ==========================================
-# 1. 시스템 환경 설정 (Configuration)
+# 지능형 환경 진단 및 데이터 사이언스 모듈 (Intelligent Environment Diagnosis & Data Science Module)
 # ==========================================
-# 1) 오디오 파일 (stt_benchmark 폴더에 있음)
-AUDIO_FILE = "/data/data/com.termux/files/home/projects/stt_benchmark/samples/test_cut_2.wav"
+class EnvironmentManager:
+    def __init__(self):
+        self.home = os.path.expanduser("~")
+        self.projects_dir = os.path.join(self.home, "projects")
+        self.current_dir = os.getcwd()
+        
+        # 탐색된 경로들
+        self.whisper_cmd = None
+        self.whisper_model_small = None
+        self.whisper_model_medium = None
+        self.libvosk_path = None
+        self.audio_file = None
+        
+        # 초기화 실행
+        self._discover_paths()
+        self._check_dependencies()
+    
+    def _discover_paths(self):
+        print("[INIT] 환경 자동 탐색 중...")
+        
+        # 1. Whisper 실행 파일 탐색
+        self._find_whisper_executable()
+        
+        # 2. Whisper 모델 파일 탐색
+        self._find_whisper_models()
+        
+        # 3. Vosk 라이브러리 탐색
+        self._find_libvosk()
+        
+        # 4. 오디오 파일 탐색
+        self._find_audio_file()
+        
+        print("[INIT] 환경 탐색 완료")
+    
+    def _find_whisper_executable(self):
+        candidates = ["whisper-cli", "main"]
+        search_paths = [
+            self.projects_dir,
+            os.path.join(self.projects_dir, "whisper.cpp"),
+            os.path.join(self.projects_dir, "whisper.cpp", "build"),
+            os.path.join(self.projects_dir, "whisper.cpp", "build", "bin")
+        ]
+        
+        # ~/projects 하위 모든 폴더 검색
+        for root, dirs, files in os.walk(self.projects_dir):
+            for candidate in candidates:
+                if candidate in files:
+                    full_path = os.path.join(root, candidate)
+                    if os.access(full_path, os.X_OK):
+                        self.whisper_cmd = full_path
+                        print(f"[INIT] Whisper 실행 파일 발견: {self.whisper_cmd}")
+                        return
+        
+        # $HOME 전체 검색
+        print("[INIT] ~/projects에서 Whisper 실행 파일을 찾지 못했습니다. $HOME 전체 검색 중...")
+        for root, dirs, files in os.walk(self.home):
+            for candidate in candidates:
+                if candidate in files:
+                    full_path = os.path.join(root, candidate)
+                    if os.access(full_path, os.X_OK):
+                        self.whisper_cmd = full_path
+                        print(f"[INIT] Whisper 실행 파일 발견: {self.whisper_cmd}")
+                        return
+        
+        print("[WARN] Whisper 엔진이 빌드되지 않았습니다. whisper.cpp를 빌드해주세요.")
+        self.whisper_cmd = None
+    
+    def _find_whisper_models(self):
+        model_names = ["ggml-small.bin", "ggml-medium.bin"]
+        search_paths = [
+            os.path.join(self.projects_dir, "whisper.cpp", "models"),
+            os.path.join(self.home, "models"),
+            self.current_dir
+        ]
+        
+        for model_name in model_names:
+            for path in search_paths:
+                full_path = os.path.join(path, model_name)
+                if os.path.isfile(full_path):
+                    if "small" in model_name:
+                        self.whisper_model_small = full_path
+                    else:
+                        self.whisper_model_medium = full_path
+                    print(f"[INIT] Whisper 모델 발견: {full_path}")
+                    break
+        
+        # 모델이 없으면 다운로드 제안
+        if not self.whisper_model_small or not self.whisper_model_medium:
+            self._offer_model_download()
+    
+    def _find_libvosk(self):
+        lib_candidates = ["libvosk.so", "libvosk.dylib", "vosk.dll"]
+        search_paths = [
+            "/usr/lib",
+            "/usr/local/lib",
+            os.path.join(self.home, ".local", "lib"),
+            self.projects_dir
+        ]
+        
+        for path in search_paths:
+            if os.path.exists(path):
+                for root, dirs, files in os.walk(path):
+                    for lib in lib_candidates:
+                        if lib in files:
+                            self.libvosk_path = os.path.join(root, lib)
+                            print(f"[INIT] Vosk 라이브러리 발견: {self.libvosk_path}")
+                            return
+        
+        print("[WARN] libvosk.so를 찾지 못했습니다. 설치가 필요할 수 있습니다.")
+        self.libvosk_path = None
+    
+    def _offer_model_download(self):
+        print("[INIT] 일부 Whisper 모델이 없습니다.")
+        response = input("모델을 다운로드할까요? (y/n): ").strip().lower()
+        if response == 'y':
+            self._download_models()
+        else:
+            print("[INIT] 모델 다운로드를 건너뜁니다.")
+    
+    def _download_models(self):
+        models_dir = os.path.join(self.projects_dir, "whisper.cpp", "models")
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # download-ggml-model.sh 스크립트 사용 시도
+        script_path = os.path.join(self.projects_dir, "whisper.cpp", "models", "download-ggml-model.sh")
+        if os.path.isfile(script_path):
+            print("[INIT] download-ggml-model.sh를 사용하여 모델 다운로드 중...")
+            try:
+                subprocess.run([script_path, "small"], check=True)
+                subprocess.run([script_path, "medium"], check=True)
+                self._find_whisper_models()  # 재탐색
+                return
+            except subprocess.CalledProcessError:
+                print("[WARN] download-ggml-model.sh 실행 실패. 직접 다운로드 시도.")
+        
+        # 직접 curl 다운로드
+        base_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+        models = {
+            "ggml-small.bin": "ggml-small.bin",
+            "ggml-medium.bin": "ggml-medium.bin"
+        }
+        
+        for model_name, filename in models.items():
+            url = f"{base_url}/{filename}"
+            output_path = os.path.join(models_dir, model_name)
+            print(f"[INIT] 다운로드 중: {url} -> {output_path}")
+            try:
+                subprocess.run(["curl", "-L", url, "-o", output_path], check=True)
+                if "small" in model_name:
+                    self.whisper_model_small = output_path
+                else:
+                    self.whisper_model_medium = output_path
+            except subprocess.CalledProcessError:
+                print(f"[ERROR] {model_name} 다운로드 실패")
+    
+    def _find_audio_file(self):
+        # 기본 오디오 파일 경로 시도
+        default_audio = "/data/data/com.termux/files/home/projects/stt_benchmark/samples/test_cut_2.wav"
+        if os.path.isfile(default_audio):
+            self.audio_file = default_audio
+            print(f"[INIT] 기본 오디오 파일 발견: {self.audio_file}")
+            return
+        
+        # 현재 디렉토리에서 .wav 파일 검색 및 선택
+        wav_files = [f for f in os.listdir(self.current_dir) if f.endswith('.wav')]
+        if wav_files:
+            print("[INIT] 현재 디렉토리의 .wav 파일들:")
+            for i, f in enumerate(wav_files):
+                print(f"  {i+1}. {f}")
+            try:
+                choice = input("사용할 오디오 파일 번호를 입력하세요 (또는 직접 경로 입력): ").strip()
+                if choice.isdigit():
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(wav_files):
+                        self.audio_file = os.path.join(self.current_dir, wav_files[idx])
+                    else:
+                        self.audio_file = choice
+                else:
+                    self.audio_file = choice
+            except ValueError:
+                self.audio_file = input("오디오 파일 경로를 입력하세요: ").strip()
+        else:
+            self.audio_file = input("오디오 파일 경로를 입력하세요: ").strip()
+        
+        if not os.path.isfile(self.audio_file):
+            print(f"[ERROR] 오디오 파일을 찾을 수 없습니다: {self.audio_file}")
+            self.audio_file = None
+    
+    def _check_dependencies(self):
+        print("[INIT] 의존성 확인 중...")
+        
+        # Vosk 체크
+        try:
+            import vosk
+            print("[INIT] Vosk 라이브러리 확인됨")
+        except ImportError:
+            print("[WARN] Vosk 라이브러리가 설치되지 않았습니다.")
+            self._offer_install("vosk")
+        
+        # Matplotlib 체크
+        try:
+            import matplotlib
+            print("[INIT] Matplotlib 라이브러리 확인됨")
+        except ImportError:
+            print("[WARN] Matplotlib 라이브러리가 설치되지 않았습니다.")
+            self._offer_install("matplotlib")
+        
+        # Numpy 체크 (선택적)
+        try:
+            import numpy
+            print("[INIT] Numpy 라이브러리 확인됨")
+        except ImportError:
+            print("[INFO] Numpy 라이브러리가 설치되지 않았습니다. (선택적)")
+    
+    def _offer_install(self, package):
+        response = input(f"{package}를 설치할까요? (y/n): ").strip().lower()
+        if response == 'y':
+            try:
+                if package == "vosk":
+                    # Termux에서는 apt 사용
+                    if os.path.exists("/data/data/com.termux"):
+                        subprocess.run(["pkg", "install", "vosk-api", "-y"], check=True)
+                    else:
+                        subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
+                else:
+                    subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
+                print(f"[INIT] {package} 설치 완료")
+            except subprocess.CalledProcessError:
+                print(f"[ERROR] {package} 설치 실패")
+        else:
+            print(f"[INIT] {package} 설치를 건너뜁니다.")
 
-# 2) Whisper 실행 파일 (build/bin 경로 반영 완료!)
-WHISPER_CMD = "/data/data/com.termux/files/home/projects/whisper.cpp/build/bin/whisper-cli"
-
-# 3) Whisper 모델 파일
-WHISPER_MODEL_SMALL = "/data/data/com.termux/files/home/projects/whisper.cpp/models/ggml-small.bin"
-WHISPER_MODEL_MEDIUM = "/data/data/com.termux/files/home/projects/whisper.cpp/models/ggml-medium.bin"
+# ==========================================
+# 1. 시스템 환경 설정 (Configuration) - 이제 EnvironmentManager에서 관리
 # ==========================================
 # 2. 순수 파이썬 기반 수학 연산 (Vector Operations)
 # ==========================================
@@ -149,8 +375,27 @@ def create_output_prefix(base_name, args, model_name):
     return f"{base_name}_{ts}_sp{args.speakers}_mo{args.max_offset}_{model_name}"
 
 
+def setup_matplotlib_fonts():
+    """한글 폰트 설정 및 예외 처리"""
+    try:
+        import matplotlib.font_manager as fm
+        # 시스템 폰트 찾기
+        font_list = fm.findSystemFonts()
+        korean_fonts = [f for f in font_list if 'nanum' in f.lower() or 'malgun' in f.lower() or 'gulim' in f.lower()]
+        
+        if korean_fonts:
+            plt.rcParams['font.family'] = 'NanumGothic' if 'nanum' in korean_fonts[0].lower() else 'Malgun Gothic'
+            print("[FONT] 한글 폰트 설정됨")
+        else:
+            plt.rcParams['font.family'] = 'DejaVu Sans'
+            print("[FONT] 한글 폰트가 없어 영문 폰트로 대체합니다")
+    except Exception as e:
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        print(f"[FONT] 폰트 설정 중 오류: {e}, 영문 폰트 사용")
+
+
 def write_csv_log(whisper_segments, csv_path):
-    fieldnames = ["start", "end", "speaker_id", "matched", "time_offset", "confidence", "text"]
+    fieldnames = ["start", "end", "speaker_id", "matched", "time_offset", "cosine_similarity", "text"]
     with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -161,24 +406,26 @@ def write_csv_log(whisper_segments, csv_path):
                 "speaker_id": seg.get("speaker_id", "Unknown"),
                 "matched": bool(seg.get("matched", False)),
                 "time_offset": seg.get("time_offset", ""),
-                "confidence": round(seg.get("confidence", 0.0), 4),
+                "cosine_similarity": round(seg.get("confidence", 0.0), 4),
                 "text": seg.get("text", "").replace("\n", " ")
             })
 
 
 def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix="ameva_result"):
-    # Build speaker id list (exclude unknown -1)
+    # 한글 폰트 설정
+    setup_matplotlib_fonts()
+    
     speaker_ids = sorted({v.get('speaker_id', -1) for v in vosk_speakers if v.get('speaker_id', -1) != -1})
     if not speaker_ids:
         speaker_ids = [0]
 
     id_to_y = {sid: i for i, sid in enumerate(speaker_ids)}
     unknown_y = len(speaker_ids)
-
-    fig, ax = plt.subplots(figsize=(12, 2 + len(speaker_ids)))
     cmap = plt.get_cmap('tab10')
 
-    # Plot Vosk speaker segments as horizontal bars
+    fig, (ax_time, ax_scatter) = plt.subplots(2, 1, figsize=(14, 12), gridspec_kw={'height_ratios': [1, 1]})
+
+    # Timeline visualization
     for v in vosk_speakers:
         sid = v.get('speaker_id', -1)
         y = id_to_y.get(sid, unknown_y)
@@ -187,40 +434,87 @@ def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coo
         width = max(0.001, end - start)
         color = cmap(sid % 10) if sid != -1 else 'gray'
         rect = patches.Rectangle((start, y - 0.3), width, 0.6, facecolor=color, alpha=0.6, edgecolor='k')
-        ax.add_patch(rect)
+        ax_time.add_patch(rect)
 
-    # Plot Whisper segments as text labels positioned at matched speaker row
     for w in whisper_segments:
         sid = w.get('speaker_id', -1)
         y = id_to_y.get(sid, unknown_y)
         x = (w['start'] + w['end']) / 2.0
         txt = w.get('text', '')
-        ax.text(x, y, txt if len(txt) < 120 else txt[:117] + '...', ha='center', va='center', fontsize=8, wrap=True)
+        annotation = txt if len(txt) < 80 else txt[:77] + '...'
+        color = 'black' if w.get('matched', False) else 'red'
+        marker = 'o' if w.get('matched', False) else 'x'
+        ax_time.scatter([x], [y], marker=marker, c=color, s=30)
+        ax_time.text(x, y + 0.35, annotation, ha='center', va='bottom', fontsize=7, color=color, wrap=True)
 
-    # Configure axes
     max_time = 0.0
     if vosk_speakers:
         max_time = max(max_time, max(v.get('end', 0) for v in vosk_speakers))
     if whisper_segments:
         max_time = max(max_time, max(w.get('end', 0) for w in whisper_segments))
 
-    ax.set_xlim(0, max_time + 0.5)
-    ax.set_ylim(-1, len(speaker_ids) + 0.5)
+    ax_time.set_xlim(0, max_time + 0.5)
+    ax_time.set_ylim(-1, len(speaker_ids) + 0.5)
     y_ticks = list(range(len(speaker_ids)))
-    ax.set_yticks(y_ticks + [unknown_y])
-    ax.set_yticklabels([f"Speaker {s}" for s in speaker_ids] + ["Unknown"])
-    ax.set_xlabel('Time (s)')
-    ax.set_title('Speaker Diarization and Transcript Mapping')
-    plt.tight_layout()
+    ax_time.set_yticks(y_ticks + [unknown_y])
+    ax_time.set_yticklabels([f"Speaker {s}" for s in speaker_ids] + ["Unknown"])
+    ax_time.set_xlabel('Time (s)')
+    ax_time.set_title('Whisper-Vosk Timeline and Mapping')
+    ax_time.grid(axis='x', alpha=0.3)
 
+    # PCA scatter visualization
+    if pca_coords:
+        xs = [coord[0] for coord in pca_coords]
+        ys = [coord[1] for coord in pca_coords]
+        colors = [cmap(v.get('speaker_id', -1) % 10) if v.get('speaker_id', -1) != -1 else 'gray' for v in vosk_speakers]
+        ax_scatter.scatter(xs, ys, c=colors, s=70, edgecolors='k', alpha=0.8)
+
+        for idx, (x, y) in enumerate(pca_coords):
+            ax_scatter.text(x, y, str(idx), fontsize=8, ha='center', va='center')
+
+        for sid, coord in centroid_coords.items():
+            ax_scatter.scatter(coord[0], coord[1], marker='X', s=180, c=cmap(sid % 10), edgecolors='black')
+            ax_scatter.text(coord[0], coord[1], f'C{sid}', fontsize=10, weight='bold', ha='center', va='center')
+
+        for i, w in enumerate(whisper_segments):
+            mapped_idx = w.get('mapped_vosk_index', -1)
+            if 0 <= mapped_idx < len(pca_coords):
+                px, py = pca_coords[mapped_idx]
+                label = f"{i}:{w.get('text','')[:24]}"
+                offset = 0.12 if i % 2 == 0 else -0.12
+                if w.get('matched', False):
+                    ax_scatter.annotate(label, xy=(px, py), xytext=(px + 0.25, py + offset), arrowprops={'arrowstyle': '->', 'color': 'black', 'alpha': 0.7}, fontsize=7)
+                else:
+                    ax_scatter.scatter([px], [py], marker='X', c='red', s=120, edgecolors='k')
+                    ax_scatter.annotate(label + ' (Unknown)', xy=(px, py), xytext=(px + 0.25, py + offset), arrowprops={'arrowstyle': '-|>', 'color': 'red', 'alpha': 0.7, 'linestyle': 'dashed'}, fontsize=7, color='red')
+
+        legend_handles = []
+        for sid in speaker_ids:
+            legend_handles.append(patches.Patch(color=cmap(sid % 10), label=f'Speaker {sid}'))
+        legend_handles.append(plt.Line2D([0], [0], marker='X', color='w', label='Centroid', markerfacecolor='black', markersize=10))
+        legend_handles.append(plt.Line2D([0], [0], marker='x', color='red', label='Unknown', markersize=8))
+        ax_scatter.legend(handles=legend_handles, loc='best', fontsize=8)
+        ax_scatter.set_title('Vosk X-Vector PCA Scatter with Speaker Clusters')
+        ax_scatter.set_xlabel('PCA Component 1')
+        ax_scatter.set_ylabel('PCA Component 2')
+        ax_scatter.grid(alpha=0.3)
+    else:
+        ax_scatter.text(0.5, 0.5, 'PCA unavailable: no Vosk vectors', ha='center', va='center', fontsize=12)
+        ax_scatter.axis('off')
+
+    fig.tight_layout()
     jpg_path = f"{output_prefix}.jpg"
     fig.savefig(jpg_path, dpi=150)
     plt.close(fig)
 
-    # Save JSON result for inspection
     json_path = f"{output_prefix}.json"
     with open(json_path, 'w', encoding='utf-8') as jf:
-        json.dump({"whisper_segments": whisper_segments, "vosk_speakers": vosk_speakers}, jf, ensure_ascii=False, indent=2)
+        json.dump({
+            "whisper_segments": whisper_segments,
+            "vosk_speakers": vosk_speakers,
+            "centroid_coords": centroid_coords,
+            "timestamp": datetime.now().isoformat()
+        }, jf, ensure_ascii=False, indent=2)
 
     print(f"[OUTPUT] Saved visualization: {jpg_path}")
     print(f"[OUTPUT] Saved JSON result: {json_path}")
@@ -229,6 +523,20 @@ def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coo
 # 3. 메인 프로세스 (Main Execution)
 # ==========================================
 def main():
+    # 환경 초기화
+    env_manager = EnvironmentManager()
+    
+    # 필수 경로 확인
+    if not env_manager.whisper_cmd:
+        print("[ERROR] Whisper 실행 파일이 필요합니다.")
+        sys.exit(1)
+    if not env_manager.whisper_model_small and not env_manager.whisper_model_medium:
+        print("[ERROR] Whisper 모델 파일이 필요합니다.")
+        sys.exit(1)
+    if not env_manager.audio_file:
+        print("[ERROR] 오디오 파일이 필요합니다.")
+        sys.exit(1)
+    
     # CLI 파라미터(Args) 설정
     parser = argparse.ArgumentParser(description="AMEVA Hybrid STT Engine (Whisper + Vosk)")
     group = parser.add_mutually_exclusive_group()
@@ -245,14 +553,28 @@ def main():
 
     # 모델 라우팅 로직
     if args.medium:
-        active_whisper_model = WHISPER_MODEL_MEDIUM
-        model_name = "Medium"
+        if not env_manager.whisper_model_medium:
+            print("[ERROR] Medium 모델이 없습니다. Small 모델로 전환합니다.")
+            active_whisper_model = env_manager.whisper_model_small
+            model_name = "Small"
+        else:
+            active_whisper_model = env_manager.whisper_model_medium
+            model_name = "Medium"
     else:
-        active_whisper_model = WHISPER_MODEL_SMALL
-        model_name = "Small"
+        if not env_manager.whisper_model_small:
+            if env_manager.whisper_model_medium:
+                print("[WARN] Small 모델이 없어 Medium 모델로 전환합니다.")
+                active_whisper_model = env_manager.whisper_model_medium
+                model_name = "Medium"
+            else:
+                print("[ERROR] 사용할 수 있는 모델이 없습니다.")
+                sys.exit(1)
+        else:
+            active_whisper_model = env_manager.whisper_model_small
+            model_name = "Small"
 
     print("[SYSTEM] AMEVA Hybrid STT Engine 프로세스 시작")
-    print(f"[SYSTEM] 대상 오디오: {AUDIO_FILE}")
+    print(f"[SYSTEM] 대상 오디오: {env_manager.audio_file}")
     print(f"[SYSTEM] 적용 모델: Whisper {model_name}")
     print(f"[SYSTEM] 설정된 화자 수: {args.speakers}명 / 허용 오차: {args.max_offset}초")
     
@@ -266,9 +588,9 @@ def main():
     
     # 1. 실행 명령어 리스트 구성
     whisper_args = [
-        WHISPER_CMD, 
+        env_manager.whisper_cmd, 
         "-m", active_whisper_model, 
-        "-f", AUDIO_FILE, 
+        "-f", env_manager.audio_file, 
         "-oj", "-nt"
     ]
 
@@ -281,7 +603,7 @@ def main():
     subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # 4. 결과 JSON 파일 경로 정의 (이 줄이 빠져서 에러가 났던 겁니다!)
-    whisper_json_file = AUDIO_FILE + ".json"
+    whisper_json_file = env_manager.audio_file + ".json"
 
     if not os.path.exists(whisper_json_file):
         print("[ERROR] Whisper JSON 결과물을 찾을 수 없습니다. 경로를 확인하세요.")
@@ -316,9 +638,9 @@ def main():
         sys.exit(1)
 
     try:
-        wf = wave.open(AUDIO_FILE, "rb")
+        wf = wave.open(env_manager.audio_file, "rb")
     except FileNotFoundError:
-        print(f"[ERROR] 오디오 파일 탐색 실패: {AUDIO_FILE}")
+        print(f"[ERROR] 오디오 파일 탐색 실패: {env_manager.audio_file}")
         sys.exit(1)
         
     rec = KaldiRecognizer(model, wf.getframerate(), spk_model)
@@ -356,55 +678,84 @@ def main():
     phase3_start = time.time()
 
     all_vectors = [v['vector'] for v in vosk_speakers]
-    cluster_labels = kmeans_clustering_k(all_vectors, k=args.speakers)
+    cluster_labels, centroids = kmeans_clustering_k(all_vectors, k=args.speakers)
 
     for i, v_seg in enumerate(vosk_speakers):
         v_seg['speaker_id'] = cluster_labels[i]
+
+    pca_coords, pca_transform = pca_2d(all_vectors)
+    centroid_coords_list = project_vectors(centroids, pca_transform)
+    centroid_coords = {i: coord for i, coord in enumerate(centroid_coords_list)}
 
     print("\n============================================================")
     print("[결과] AMEVA 하이브리드 STT 출력 파이프라인")
     print("============================================================")
 
+    matched_count = 0
     for w_seg in whisper_segments:
         w_mid = (w_seg['start'] + w_seg['end']) / 2.0
         
         matched_speaker_id = -1
-        current_min_diff = float('inf')
+        best_idx = -1
+        nearest_time_diff = float('inf')
+        matching_time_diff = float('inf')
         
-        for v_seg in vosk_speakers:
+        for idx, v_seg in enumerate(vosk_speakers):
             v_mid = (v_seg['start'] + v_seg['end']) / 2.0
             time_diff = abs(w_mid - v_mid)
-            
-            # 조건 1: 시간 구간에 완벽히 포함되는 경우
+            if time_diff < nearest_time_diff:
+                nearest_time_diff = time_diff
+                best_idx = idx
+
             if v_seg['start'] <= w_mid <= v_seg['end']:
                 matched_speaker_id = v_seg['speaker_id']
+                best_idx = idx
+                matching_time_diff = 0.0
                 break
-                
-            # 조건 2: 겹치지는 않지만, args.max_offset 이내에서 가장 가까운 경우
-            elif time_diff <= args.max_offset and time_diff < current_min_diff:
-                current_min_diff = time_diff
+            elif time_diff <= args.max_offset and time_diff < matching_time_diff:
                 matched_speaker_id = v_seg['speaker_id']
-        
-        # 매핑 실패 방어 로직 적용
+                matching_time_diff = time_diff
+
+        w_seg['mapped_vosk_index'] = best_idx
         w_seg['speaker_id'] = matched_speaker_id
+        w_seg['time_offset'] = matching_time_diff if matching_time_diff != float('inf') else nearest_time_diff if nearest_time_diff != float('inf') else None
+        w_seg['matched'] = matched_speaker_id != -1
+
+        if best_idx != -1 and best_idx < len(vosk_speakers):
+            v_seg = vosk_speakers[best_idx]
+            centroid = centroids[cluster_labels[best_idx]] if centroids else v_seg['vector']
+            w_seg['confidence'] = cosine_similarity(v_seg['vector'], centroid)
+        else:
+            w_seg['confidence'] = 0.0
+
+        if w_seg['matched']:
+            matched_count += 1
+
         speaker_label = f"Speaker {matched_speaker_id}" if matched_speaker_id != -1 else "Unknown"
-        print(f"[{w_seg['start']:>5.1f}s - {w_seg['end']:>5.1f}s] [{speaker_label}] : {w_seg['text']}")
+        print(f"[{w_seg['start']:>5.1f}s - {w_seg['end']:>5.1f}s] [{speaker_label}] time_offset={w_seg['time_offset']:.3f} conf={w_seg['confidence']:.4f} : {w_seg['text']}")
 
     print("============================================================")
-    
+
+    success_rate = (matched_count / len(whisper_segments) * 100.0) if whisper_segments else 0.0
     phase3_end = time.time()
     total_end_time = time.time()
-    # 저장: 시각화(JPG) 및 JSON 결과
+
+    output_prefix = create_output_prefix(args.output, args, model_name)
+    csv_path = f"{output_prefix}.csv"
+    write_csv_log(whisper_segments, csv_path)
+    print(f"[OUTPUT] Saved CSV log: {csv_path}")
+
     try:
-        save_visualization(whisper_segments, vosk_speakers, output_prefix=args.output)
+        save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix=output_prefix)
     except Exception as e:
         print(f"[WARN] 시각화 저장 중 오류: {e}")
-    
+
     print(f"\n[성능 프로파일링] 프로세스 실행 시간 요약")
-    print(f"  - Phase 1 (Whisper ASR) : {phase1_end - phase1_start:.2f} sec")
-    print(f"  - Phase 2 (Vosk Spk)    : {phase2_end - phase2_start:.2f} sec")
-    print(f"  - Phase 3 (Clustering)  : {phase3_end - phase3_start:.2f} sec")
+    print(f"  - Phase 1 (Whisper ASR) : {phase1_end - phase1_start:.2f} sec ({(phase1_end - phase1_start) / (total_end_time - total_start_time) * 100 if total_end_time > total_start_time else 0:.1f}%)")
+    print(f"  - Phase 2 (Vosk Spk)    : {phase2_end - phase2_start:.2f} sec ({(phase2_end - phase2_start) / (total_end_time - total_start_time) * 100 if total_end_time > total_start_time else 0:.1f}%)")
+    print(f"  - Phase 3 (Clustering)  : {phase3_end - phase3_start:.2f} sec ({(phase3_end - phase3_start) / (total_end_time - total_start_time) * 100 if total_end_time > total_start_time else 0:.1f}%)")
     print(f"  - 총 소요 시간          : {total_end_time - total_start_time:.2f} sec")
+    print(f"  - 매핑 성공률            : {success_rate:.2f}% ({matched_count}/{len(whisper_segments)})")
 
 if __name__ == "__main__":
     main()
