@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# Settings & Local Data
+settings.json
+C:/ameva/AI_Models/
+C:/ameva/stt_benchmark/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Project Specific
+*.log
+results/
+samples/
+docker/data/
