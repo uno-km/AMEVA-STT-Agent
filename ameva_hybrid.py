@@ -166,6 +166,7 @@ def main():
     print("\n[Phase 1] Whisper.cpp 전사 작업 수행 중...")
     phase1_start = time.time()
     
+    # 1. 실행 명령어 리스트 구성
     whisper_args = [
         WHISPER_CMD, 
         "-m", active_whisper_model, 
@@ -173,12 +174,20 @@ def main():
         "-oj", "-nt"
     ]
 
-    # 사용자가 --ko 옵션을 넣었다면 리스트에 추가!
+    # 2. 사용자가 --ko 옵션을 넣었다면 한국어 옵션(-l ko) 추가
     if args.ko:
         whisper_args.extend(["-l", "ko"])
         print("[SYSTEM] 한국어 강제 인식 모드가 활성화되었습니다.")
 
+    # 3. Whisper 실행
     subprocess.run(whisper_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # 4. 결과 JSON 파일 경로 정의 (이 줄이 빠져서 에러가 났던 겁니다!)
+    whisper_json_file = AUDIO_FILE + ".json"
+
+    if not os.path.exists(whisper_json_file):
+        print("[ERROR] Whisper JSON 결과물을 찾을 수 없습니다. 경로를 확인하세요.")
+        sys.exit(1)
 
     with open(whisper_json_file, "r", encoding="utf-8") as f:
         whisper_data = json.load(f)
