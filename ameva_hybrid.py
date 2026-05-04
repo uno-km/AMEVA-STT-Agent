@@ -578,7 +578,7 @@ def main():
     parser.add_argument("--max_offset", type=float, default=3.0, help="매핑 허용 최대 오차 시간(초) (기본값: 3.0)")
     parser.add_argument("--output", type=str, default="ameva_result", help="결과 출력 파일 접두사 (예: ameva_result)")
     parser.add_argument("-ko", "--ko", dest="ko", action="store_true", help="한국어(Korean) 위스퍼 모드 발동 (-l ko)")
-    parser.add_argument("--whisper_max_len", type=int, default=500, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준, 시간 단위 아님)")
+    parser.add_argument("--whisper_max_len", type=int, default=30, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준, 시간 단위 아님) - 기본값 낮춤")
     parser.add_argument("--whisper_split_on_word", action="store_true", help="Whisper.cpp -sow 옵션 사용: 단어 경계 기준 분리 (기본값: 사용 안 함)")
     parser.add_argument("--whisper_vad", action="store_true", help="Whisper.cpp VAD (Voice Activity Detection) 활성화: 음성/침묵 기준 세그먼트 분리")
     parser.add_argument("--whisper_vad_max_speech_duration", type=int, default=5, help="VAD 최대 연속 음성 길이 (초) (기본값: 5)")
