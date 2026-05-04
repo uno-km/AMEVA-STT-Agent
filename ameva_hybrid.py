@@ -17,10 +17,15 @@ import matplotlib.patches as patches
 # ==========================================
 # 1. 시스템 환경 설정 (Configuration)
 # ==========================================
+# 1) 오디오 파일 (stt_benchmark 폴더에 있음)
 AUDIO_FILE = "/data/data/com.termux/files/home/projects/stt_benchmark/samples/test_cut_2.wav"
-WHISPER_CMD = "/data/data/com.termux/files/home/projects/stt_benchmark/whisper.cpp/main"
-WHISPER_MODEL_SMALL = "/data/data/com.termux/files/home/projects/stt_benchmark/whisper.cpp/models/ggml-small.bin"
-WHISPER_MODEL_MEDIUM = "/data/data/com.termux/files/home/projects/stt_benchmark/whisper.cpp/models/ggml-medium.bin"
+
+# 2) Whisper 실행 파일 (이름이 main에서 whisper-cli로 변경됨!)
+WHISPER_CMD = "/data/data/com.termux/files/home/projects/whisper.cpp/whisper-cli"
+
+# 3) Whisper 모델 파일
+WHISPER_MODEL_SMALL = "/data/data/com.termux/files/home/projects/whisper.cpp/models/ggml-small.bin"
+WHISPER_MODEL_MEDIUM = "/data/data/com.termux/files/home/projects/whisper.cpp/models/ggml-medium.bin"
 
 # ==========================================
 # 2. 순수 파이썬 기반 수학 연산 (Vector Operations)
