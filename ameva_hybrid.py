@@ -547,6 +547,55 @@ def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coo
     print(f"[OUTPUT] Saved visualization: {jpg_path}")
     print(f"[OUTPUT] Saved JSON result: {json_path}")
 
+
+def save_meeting_minutes(whisper_segments, output_prefix):
+    """회의록을 Markdown 및 텍스트로 저장합니다."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    md_lines = [
+        "# 🎙️ 자동 생성 회의록 (AMEVA Hybrid STT)",
+        f"- **생성 일시:** {now}",
+        "- **사용 엔진:** Whisper (Text) + Vosk (Diarization)",
+        "",
+        "---",
+        ""
+    ]
+    txt_lines = [
+        "자동 생성 회의록 (AMEVA Hybrid STT)",
+        f"생성 일시: {now}",
+        "사용 엔진: Whisper (Text) + Vosk (Diarization)",
+        "",
+        "============================================================",
+        ""
+    ]
+
+    prev_speaker = None
+    for seg in whisper_segments:
+        speaker_id = seg.get("speaker_id", -1)
+        speaker_label = "Unknown" if speaker_id == -1 else f"Speaker {speaker_id}"
+        start = seg.get("start", 0.0)
+        end = seg.get("end", 0.0)
+        text = seg.get("text", "").strip()
+        ts = f"[{start:05.1f}s - {end:05.1f}s]"
+
+        if speaker_id != prev_speaker:
+            md_lines.append(f"### 🗣️ {speaker_label}")
+            txt_lines.append(f"{speaker_label}")
+            prev_speaker = speaker_id
+
+        md_lines.append(f"> {ts} {text}")
+        txt_lines.append(f"{ts} {text}")
+
+    md_path = f"{output_prefix}_minutes.md"
+    txt_path = f"{output_prefix}_minutes.txt"
+
+    with open(md_path, "w", encoding="utf-8") as md_file:
+        md_file.write("\n".join(md_lines) + "\n")
+
+    with open(txt_path, "w", encoding="utf-8") as txt_file:
+        txt_file.write("\n".join(txt_lines) + "\n")
+
+    return md_path, txt_path
+
 # ==========================================
 # 3. 메인 프로세스 (Main Execution)
 # ==========================================
@@ -797,6 +846,12 @@ def main():
         save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix=output_prefix, env_manager=env_manager, args=args, model_name=model_name, total_time=total_end_time - total_start_time, success_rate=success_rate)
     except Exception as e:
         print(f"[WARN] 시각화 저장 중 오류: {e}")
+
+    try:
+        md_path, txt_path = save_meeting_minutes(whisper_segments, output_prefix)
+        print(f"[OUTPUT] ✨ 회의록 자동 생성 완료: {md_path}, {txt_path}")
+    except Exception as e:
+        print(f"[WARN] 회의록 저장 중 오류: {e}")
 
     print(f"\n[성능 프로파일링] 프로세스 실행 시간 요약")
     print(f"  - Phase 1 (Whisper ASR) : {phase1_end - phase1_start:.2f} sec ({(phase1_end - phase1_start) / (total_end_time - total_start_time) * 100 if total_end_time > total_start_time else 0:.1f}%)")
