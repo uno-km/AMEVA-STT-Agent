@@ -370,9 +370,13 @@ def project_vectors(vectors, transform):
     return [[sum((vec[i] - mean[i]) * comps[j][i] for i in range(len(vec))) for j in range(2)] for vec in vectors]
 
 
-def create_output_prefix(base_name, args, model_name):
+def create_output_prefix(base_name, args, model_name, audio_file):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    return f"{base_name}_{ts}_sp{args.speakers}_mo{args.max_offset}_{model_name}"
+    audio_basename = os.path.basename(audio_file)
+    speakers_param = f"sp{args.speakers}"
+    offset_param = f"mo{args.max_offset}"
+    ko_param = "_ko" if args.ko else ""
+    return f"{base_name}_{ts}_{speakers_param}_{offset_param}_{model_name}{ko_param}_{audio_basename}"
 
 
 def setup_matplotlib_fonts():
@@ -394,9 +398,21 @@ def setup_matplotlib_fonts():
         print(f"[FONT] 폰트 설정 중 오류: {e}, 영문 폰트 사용")
 
 
-def write_csv_log(whisper_segments, csv_path):
-    fieldnames = ["start", "end", "speaker_id", "matched", "time_offset", "cosine_similarity", "text"]
+def write_csv_log(whisper_segments, csv_path, env_manager=None, args=None, model_name="", total_time=0.0, success_rate=0.0):
     with open(csv_path, "w", encoding="utf-8", newline="") as csvfile:
+        # 메타데이터 주석 추가
+        csvfile.write(f"# AMEVA Hybrid STT Result\n")
+        csvfile.write(f"# Timestamp: {datetime.now().isoformat()}\n")
+        csvfile.write(f"# Audio File: {env_manager.audio_file if env_manager else 'unknown'}\n")
+        csvfile.write(f"# Model: {model_name}\n")
+        csvfile.write(f"# Speakers: {args.speakers if args else 2}\n")
+        csvfile.write(f"# Max Offset: {args.max_offset if args else 3.0}\n")
+        csvfile.write(f"# Korean Mode: {args.ko if args else False}\n")
+        csvfile.write(f"# Execution Time: {total_time:.2f}s\n")
+        csvfile.write(f"# Success Rate: {success_rate:.2f}%\n")
+        csvfile.write("\n")  # 빈 줄
+        
+        fieldnames = ["start", "end", "speaker_id", "matched", "time_offset", "cosine_similarity", "text"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for seg in whisper_segments:
@@ -411,7 +427,7 @@ def write_csv_log(whisper_segments, csv_path):
             })
 
 
-def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix="ameva_result"):
+def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix="ameva_result", env_manager=None, args=None, model_name="", total_time=0.0, success_rate=0.0):
     # 한글 폰트 설정
     setup_matplotlib_fonts()
     
@@ -510,10 +526,19 @@ def save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coo
     json_path = f"{output_prefix}.json"
     with open(json_path, 'w', encoding='utf-8') as jf:
         json.dump({
+            "metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "audio_file": env_manager.audio_file if env_manager else "unknown",
+                "model": model_name,
+                "speakers": args.speakers if args else 2,
+                "max_offset": args.max_offset if args else 3.0,
+                "korean_mode": args.ko if args else False,
+                "execution_time": total_time,
+                "success_rate": success_rate
+            },
             "whisper_segments": whisper_segments,
             "vosk_speakers": vosk_speakers,
-            "centroid_coords": centroid_coords,
-            "timestamp": datetime.now().isoformat()
+            "centroid_coords": centroid_coords
         }, jf, ensure_ascii=False, indent=2)
 
     print(f"[OUTPUT] Saved visualization: {jpg_path}")
@@ -740,13 +765,13 @@ def main():
     phase3_end = time.time()
     total_end_time = time.time()
 
-    output_prefix = create_output_prefix(args.output, args, model_name)
+    output_prefix = create_output_prefix(args.output, args, model_name, env_manager.audio_file)
     csv_path = f"{output_prefix}.csv"
-    write_csv_log(whisper_segments, csv_path)
+    write_csv_log(whisper_segments, csv_path, env_manager=env_manager, args=args, model_name=model_name, total_time=total_end_time - total_start_time, success_rate=success_rate)
     print(f"[OUTPUT] Saved CSV log: {csv_path}")
 
     try:
-        save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix=output_prefix)
+        save_visualization(whisper_segments, vosk_speakers, pca_coords, centroid_coords, output_prefix=output_prefix, env_manager=env_manager, args=args, model_name=model_name, total_time=total_end_time - total_start_time, success_rate=success_rate)
     except Exception as e:
         print(f"[WARN] 시각화 저장 중 오류: {e}")
 
