@@ -25,6 +25,11 @@ class BatchControlPanel(QWidget):
         # 자동 실행 타이머
         self.auto_timer = QTimer(self)
         self.auto_timer.timeout.connect(self.on_auto_timer_timeout)
+        
+        # 카운트다운 표시용 타이머 (1초 주기)
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.timeout.connect(self.update_countdown_label)
+        self.remaining_seconds = 0
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -60,7 +65,12 @@ class BatchControlPanel(QWidget):
         self.spin_interval = QSpinBox()
         self.spin_interval.setRange(1, 1440)
         self.spin_interval.setSuffix(" 분")
+        self.spin_interval.valueChanged.connect(self.toggle_auto_mode) # 주기 변경 시 즉시 반영
         form.addRow("자동 주기:", self.spin_interval)
+
+        self.label_countdown = QLabel("자동 모드 비활성")
+        self.label_countdown.setStyleSheet("color: #8b949e; font-size: 11px; margin-left: 5px;")
+        form.addRow("스케줄 상태:", self.label_countdown)
 
         self.check_auto = QCheckBox("자동 모드 활성화 (스케줄러)")
         self.check_auto.setStyleSheet("color: #a3be8c; font-weight: bold; margin-top: 5px;")
@@ -133,11 +143,24 @@ class BatchControlPanel(QWidget):
 
     def toggle_auto_mode(self):
         if self.check_auto.isChecked():
-            interval_ms = self.spin_interval.value() * 60 * 1000
+            interval_min = self.spin_interval.value()
+            interval_ms = interval_min * 60 * 1000
             self.auto_timer.start(interval_ms)
-            self.run_requested.emit() # 즉시 한 번 실행
+            self.remaining_seconds = interval_min * 60
+            self.countdown_timer.start(1000)
+            self.label_countdown.setText(f"다음 실행까지 {self.remaining_seconds}초 남음")
+            self.run_requested.emit() # 활성화 즉시 첫 실행 요청
         else:
             self.auto_timer.stop()
+            self.countdown_timer.stop()
+            self.label_countdown.setText("자동 모드 비활성")
+
+    def update_countdown_label(self):
+        if self.remaining_seconds > 0:
+            self.remaining_seconds -= 1
+            self.label_countdown.setText(f"다음 실행까지 {self.remaining_seconds}초 남음")
+        else:
+            self.remaining_seconds = self.spin_interval.value() * 60
 
     def on_auto_timer_timeout(self):
         if self.check_auto.isChecked():

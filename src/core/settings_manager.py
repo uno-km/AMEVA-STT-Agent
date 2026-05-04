@@ -14,7 +14,14 @@ class SettingsManager(QObject):
             "stt": {
                 "model": "medium", # small, medium, turbo
                 "language": "ko",
-                "threads": 4
+                "threads": 4,
+                "speakers": 2,
+                "max_offset": 2.0,
+                "max_len": 20,
+                "split_on_word": True,
+                "vad_enabled": False,
+                "vad_max_speech_duration": 5,
+                "vad_min_silence_duration": 500
             },
             "batch": {
                 "input_dir": r"C:\ameva\AMEVA-STT-Agent\input_audios",

@@ -55,6 +55,17 @@ class LoggingChartPanel(QWidget):
 
         layout.addWidget(self.tabs)
 
+        # 호버용 데이터 저장소
+        self.texts = []
+        self.sc = None
+        self.annot = self.ax.annotate("", xy=(0,0), xytext=(10,10),
+                                     textcoords="offset points",
+                                     bbox=dict(boxstyle="round", fc="#161b22", ec="#30363d", alpha=0.9),
+                                     arrowprops=dict(arrowstyle="->", color="#58a6ff"),
+                                     color="#c9d1d9", fontsize=9)
+        self.annot.set_visible(False)
+        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+
     def _create_log_browser(self):
         browser = QTextBrowser()
         browser.setAcceptRichText(True)
@@ -66,6 +77,25 @@ class LoggingChartPanel(QWidget):
             padding: 10px;
         """)
         return browser
+
+    def on_hover(self, event):
+        if self.sc is None or not event.inaxes:
+            return
+        vis = self.annot.get_visible()
+        if event.inaxes == self.ax:
+            cont, ind = self.sc.contains(event)
+            if cont:
+                idx = ind["ind"][0]
+                pos = self.sc.get_offsets()[idx]
+                self.annot.xy = pos
+                text = self.texts[idx] if idx < len(self.texts) else "..."
+                self.annot.set_text(text)
+                self.annot.set_visible(True)
+                self.canvas.draw_idle()
+            else:
+                if vis:
+                    self.annot.set_visible(False)
+                    self.canvas.draw_idle()
 
     @pyqtSlot(str)
     def append_system_log(self, text):
@@ -103,7 +133,7 @@ class LoggingChartPanel(QWidget):
         browser.append(rich_text)
         browser.verticalScrollBar().setValue(browser.verticalScrollBar().maximum())
 
-    def update_chart(self, embeddings, labels):
+    def update_chart(self, embeddings, labels, texts=None):
         # clustering tab 갱신
         self.ax.clear()
         self.ax.set_facecolor('#0d1117')
@@ -112,6 +142,15 @@ class LoggingChartPanel(QWidget):
             spine.set_edgecolor('#30363d')
         self.ax.set_title("Speaker Clustering (PCA)", color='#c9d1d9')
         
+        # 툴팁 재설정
+        self.annot = self.ax.annotate("", xy=(0,0), xytext=(10,10),
+                                     textcoords="offset points",
+                                     bbox=dict(boxstyle="round", fc="#161b22", ec="#30363d", alpha=0.9),
+                                     arrowprops=dict(arrowstyle="->", color="#58a6ff"),
+                                     color="#c9d1d9", fontsize=9)
+        self.annot.set_visible(False)
+        self.texts = texts if texts is not None else []
+        
         if embeddings is not None and len(embeddings) > 0:
-            scatter = self.ax.scatter(embeddings[:, 0], embeddings[:, 1], c=labels, cmap='viridis', alpha=0.7)
+            self.sc = self.ax.scatter(embeddings[:, 0], embeddings[:, 1], c=labels, cmap='viridis', alpha=0.7)
         self.canvas.draw()

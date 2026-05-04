@@ -126,7 +126,8 @@ class MainWindow(QMainWindow):
                     data = json.load(f)
                     embeddings = np.array(data["embeddings"])
                     labels = data["labels"]
-                    self.p_log.update_chart(embeddings, labels)
+                    texts = data.get("texts", [])
+                    self.p_log.update_chart(embeddings, labels, texts)
                     self.p_log.tabs.setCurrentIndex(2) 
                     self.p_log.append_system_log(f"📊 [{file_name}]의 DB 데이터를 복원했습니다. (Path: {os.path.basename(cluster_file)})")
             except Exception as e:
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
         self.worker = PipelineWorker(input_dir, output_dir)
         # 로깅 및 차트 업데이트
         self.worker.log_signal.connect(self.p_log.append_log)
+        self.worker.system_log_signal.connect(self.p_log.append_system_log) # 시스템 탭 연결 추가
         self.worker.chart_signal.connect(self.p_log.update_chart)
         # 작업 완료 시 뷰어 자동 업데이트 및 배치 리스트 새로고침
         self.worker.finished_signal.connect(self.p_viewer.open_file_in_tab)

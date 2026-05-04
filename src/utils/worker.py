@@ -8,7 +8,8 @@ from datetime import datetime
 
 class PipelineWorker(QThread):
     log_signal = pyqtSignal(str)
-    chart_signal = pyqtSignal(object, object)
+    system_log_signal = pyqtSignal(str) # 시스템 로그 전용 신호 추가
+    chart_signal = pyqtSignal(object, object, object) # (embeddings, labels, texts)
     finished_signal = pyqtSignal(str)
 
     def __init__(self, input_dir, output_dir):
@@ -27,6 +28,7 @@ class PipelineWorker(QThread):
         batch_id = datetime.now().strftime("%Y%m%d_%H%M")
         
         self.log_signal.emit(f"🚀 배치 작업 시작 (Batch ID: {batch_id})")
+        self.log_signal.emit(f"[*] 입력 폴더 스캔 중: {self.input_dir}")
         
         # Ensure directories
         os.makedirs(self.input_dir, exist_ok=True)
@@ -40,44 +42,54 @@ class PipelineWorker(QThread):
                     rel_path = os.path.relpath(os.path.join(root, fname), self.input_dir)
                     audio_files.append((rel_path, os.path.join(root, fname)))
         
-        if not audio_files:
-            self.log_signal.emit("⚠️ 입력 폴더에 지원되는 오디오 파일이 하나도 없습니다.")
-            return
+        self.log_signal.emit(f"[*] 총 {len(audio_files)}개의 오디오 파일 발견")
 
         # 2. Load DB and filter
         processed_files = self.load_processed_files()
-        work_queue = [f for f in audio_files if f[0] not in processed_files]
+        work_queue = []
+        for rel_path, full_path in audio_files:
+            if rel_path in processed_files:
+                self.log_signal.emit(f"[-] Skip: {rel_path} (이미 SUCCESS 기록이 있음)")
+            else:
+                work_queue.append((rel_path, full_path))
         
         if not work_queue:
-            self.log_signal.emit(f"✅ 모든 파일({len(audio_files)}개)이 이미 처리되었습니다. 새로 분석할 파일이 없습니다.")
+            if not audio_files:
+                self.log_signal.emit("⚠️ 입력 폴더에 지원되는 오디오 파일이 하나도 없습니다.")
+            else:
+                self.log_signal.emit(f"✅ 모든 파일({len(audio_files)}개)이 이미 처리되었습니다. 새로 분석할 파일이 없습니다.")
             return
 
-        self.log_signal.emit(f"[*] 총 {len(audio_files)}개 파일 발견 -> {len(work_queue)}개 신규 파일 분석 시작")
+        self.log_signal.emit(f"▶️ 신규 분석 시작: {len(work_queue)}개 파일 대기 중")
 
         for rel_path, full_path in work_queue:
             self.log_signal.emit(f"\n[Processing] {rel_path} ...")
             start_ts = time.time()
             
             try:
-                # Execute Pipeline (4개 값 반환: json_path, embeddings, labels, cluster_db_path)
-                final_json_path, embeddings, labels, cluster_db_path = pipeline.execute(
+                # Get current config snapshot for logging
+                stt_config = settings_manager.get("stt")
+                
+                # Execute Pipeline
+                final_json_path, embeddings, labels, cluster_db_path, dia_texts = pipeline.execute(
                     full_path, 
                     self.output_dir, 
-                    logger_callback=lambda msg: self.log_signal.emit(msg)
+                    logger_callback=lambda msg: self.log_signal.emit(msg),
+                    system_callback=lambda msg: self.system_log_signal.emit(msg)
                 )
                 
                 duration = time.time() - start_ts
-                self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS", "", cluster_db_path)
+                self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS", "", cluster_db_path, stt_config)
                 
                 # Update UI
-                self.chart_signal.emit(embeddings, labels)
+                self.chart_signal.emit(embeddings, labels, dia_texts)
                 self.finished_signal.emit(final_json_path)
                 
             except Exception as e:
                 duration = time.time() - start_ts
                 err_msg = str(e)
                 self.log_signal.emit(f"❌ 오류 발생: {err_msg}")
-                self.log_batch_result(rel_path, "", batch_id, duration, "FAIL", err_msg)
+                self.log_batch_result(rel_path, "", batch_id, duration, "FAIL", err_msg, "", settings_manager.get("stt"))
 
         self.log_signal.emit(f"\n✅ 모든 배치 작업이 종료되었습니다. (ID: {batch_id})")
 
@@ -95,18 +107,40 @@ class PipelineWorker(QThread):
             pass
         return processed
 
-    def log_batch_result(self, original_filename, output_filename, batch_id, duration, status, error="", cluster_db_path=""):
-        file_exists = os.path.exists(self.db_file)
+    def log_batch_result(self, original_filename, output_filename, batch_id, duration, status, error="", cluster_db_path="", stt_config=None):
+        stt_config = stt_config or {}
         fieldnames = [
             "timestamp", "original_filename", "output_filename", 
-            "batch_id", "duration", "status", "error", "cluster_db_path"
+            "batch_id", "duration", "status", "error", "cluster_db_path",
+            "model", "language", "threads", "speakers", "max_offset", 
+            "max_len", "split_on_word", "vad_enabled"
         ]
         
+        file_exists = os.path.exists(self.db_file)
+        
+        # 지능형 헤더 확장 로직 (기존 파일 컬럼 미달 시 자동 업그레이드)
+        if file_exists:
+            try:
+                with open(self.db_file, "r", encoding="utf-8") as f:
+                    header = f.readline().strip().split(",")
+                    if len(header) < len(fieldnames):
+                        # 임시 메모리에 로드 후 헤더 갈아끼우기
+                        with open(self.db_file, "r", encoding="utf-8") as rf:
+                            rows = list(csv.DictReader(rf))
+                        with open(self.db_file, "w", encoding="utf-8", newline="") as wf:
+                            writer = csv.DictWriter(wf, fieldnames=fieldnames)
+                            writer.writeheader()
+                            for r in rows:
+                                writer.writerow(r) # 없는 컬럼은 빈 값으로 자동 처리됨
+            except Exception as e:
+                print(f"Header update failed: {e}")
+
         with open(self.db_file, "a", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
+            if not os.path.exists(self.db_file) or os.path.getsize(self.db_file) == 0:
                 writer.writeheader()
-            writer.writerow({
+            
+            row_data = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "original_filename": original_filename,
                 "output_filename": output_filename,
@@ -114,8 +148,17 @@ class PipelineWorker(QThread):
                 "duration": f"{duration:.2f}",
                 "status": status,
                 "error": error,
-                "cluster_db_path": cluster_db_path
-            })
+                "cluster_db_path": cluster_db_path,
+                "model": stt_config.get("model", ""),
+                "language": stt_config.get("language", ""),
+                "threads": stt_config.get("threads", ""),
+                "speakers": stt_config.get("speakers", ""),
+                "max_offset": stt_config.get("max_offset", ""),
+                "max_len": stt_config.get("max_len", ""),
+                "split_on_word": stt_config.get("split_on_word", ""),
+                "vad_enabled": stt_config.get("vad_enabled", "")
+            }
+            writer.writerow(row_data)
         
         if error:
             self.log_exception(original_filename, batch_id, error)

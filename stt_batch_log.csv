@@ -1,3 +1,2 @@
-timestamp,original_filename,output_filename,batch_id,duration,status,error
-2026-05-04 20:58:32,test_cut_2.wav,,20260504_2054,224.00,FAIL,
-2026-05-04 21:14:41,test_cut_2.wav,C:\ameva\AMEVA-STT-Agent\output_results\test_cut_2.json,20260504_2111,221.53,SUCCESS,
+timestamp,original_filename,output_filename,batch_id,duration,status,error,cluster_db_path
+2026-05-04 20:58:32,test_cut_2.wav,,20260504_2054,224.00,FAIL,,
