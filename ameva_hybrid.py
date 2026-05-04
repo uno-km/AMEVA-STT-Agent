@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 
-SCRIPT_VERSION = "v1.0"
+SCRIPT_VERSION = "v1.1"
 SCRIPT_MODIFIED = "2026-05-04"
 
 # ==========================================
@@ -580,6 +580,9 @@ def main():
     parser.add_argument("-ko", "--ko", dest="ko", action="store_true", help="한국어(Korean) 위스퍼 모드 발동 (-l ko)")
     parser.add_argument("--whisper_max_len", type=int, default=500, help="Whisper.cpp 최대 문장 길이 (문자/토큰 수 기준, 시간 단위 아님)")
     parser.add_argument("--whisper_split_on_word", action="store_true", help="Whisper.cpp -sow 옵션 사용: 단어 경계 기준 분리 (기본값: 사용 안 함)")
+    parser.add_argument("--whisper_vad", action="store_true", help="Whisper.cpp VAD (Voice Activity Detection) 활성화: 음성/침묵 기준 세그먼트 분리")
+    parser.add_argument("--whisper_vad_max_speech_duration", type=int, default=5, help="VAD 최대 연속 음성 길이 (초) (기본값: 5)")
+    parser.add_argument("--whisper_vad_min_silence_duration", type=int, default=500, help="VAD 최소 침묵 길이 (밀리초) (기본값: 500)")
     
     args = parser.parse_args()
 
@@ -628,6 +631,12 @@ def main():
     ]
     if args.whisper_split_on_word:
         whisper_args.append("-sow")  # 단어 경계 기준 분리: 더 짧은 세그먼트를 만들 수 있음
+    if args.whisper_vad:
+        whisper_args.extend([
+            "--vad",
+            "--vad-max-speech-duration-s", str(args.whisper_vad_max_speech_duration),
+            "--vad-min-silence-duration-ms", str(args.whisper_vad_min_silence_duration)
+        ])  # VAD 활성화: 음성/침묵 기준으로 세그먼트 분리
 
     # 2. 사용자가 --ko 옵션을 넣었다면 한국어 옵션(-l ko) 추가
     if args.ko:
