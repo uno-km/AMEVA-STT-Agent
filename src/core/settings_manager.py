@@ -4,16 +4,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 class SettingsManager(QObject):
     settings_changed = pyqtSignal(dict)
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self):
-        if self._initialized: return
         super().__init__()
         self.settings_file = "settings.json"
         self.default_settings = {
@@ -25,9 +17,11 @@ class SettingsManager(QObject):
                 "threads": 4
             },
             "batch": {
-                "input_dir": "",
-                "output_dir": "",
-                "interval_min": 60
+                "input_dir": r"C:\ameva\input_audios",
+                "output_dir": r"C:\ameva\output_results",
+                "interval_min": 60,
+                "db_file": "stt_batch_log.csv",
+                "exception_db_file": "stt_exception_log.csv"
             },
             "ui": {
                 "splitter_pos": [400, 400, 400, 400]
@@ -35,7 +29,6 @@ class SettingsManager(QObject):
         }
         self.settings = self.default_settings.copy()
         self.load()
-        self._initialized = True
 
     def load(self):
         if os.path.exists(self.settings_file):
@@ -65,4 +58,5 @@ class SettingsManager(QObject):
             d = d.get(k, {})
         return d
 
+# Create the global instance
 settings_manager = SettingsManager()

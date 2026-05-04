@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextBrowser, QLabel
 from PyQt6.QtCore import pyqtSlot
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
 
@@ -50,5 +50,6 @@ class LoggingChartPanel(QWidget):
             spine.set_edgecolor('#313244')
         self.ax.set_title("Vosk Speaker Embedding PCA", color='#cdd6f4')
         
-        scatter = self.ax.scatter(embeddings[:, 0], embeddings[:, 1], c=labels, cmap='viridis', alpha=0.7)
+        if embeddings is not None and len(embeddings) > 0:
+            scatter = self.ax.scatter(embeddings[:, 0], embeddings[:, 1], c=labels, cmap='viridis', alpha=0.7)
         self.canvas.draw()

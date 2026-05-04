@@ -1,54 +1,130 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 from src.core.pipeline import STTPipeline
+from src.core.settings_manager import settings_manager
 import os
 import time
+import csv
+from datetime import datetime
 
 class PipelineWorker(QThread):
     log_signal = pyqtSignal(str)
-    chart_signal = pyqtSignal(object, object) # For PCA scatter (embeddings, labels)
-    finished_signal = pyqtSignal(str) # For opening the final JSON/TXT file
+    chart_signal = pyqtSignal(object, object)
+    finished_signal = pyqtSignal(str)
 
     def __init__(self, input_dir, output_dir):
         super().__init__()
         self.input_dir = input_dir
         self.output_dir = output_dir
+        
+        # Load batch DB info from settings
+        batch_settings = settings_manager.get("batch")
+        self.db_file = batch_settings.get("db_file", "stt_batch_log.csv")
+        self.exception_db_file = batch_settings.get("exception_db_file", "stt_exception_log.csv")
+        self.audio_extensions = (".wav", ".m4a", ".mp3", ".flac", ".aac", ".ogg", ".opus")
 
     def run(self):
         pipeline = STTPipeline()
+        batch_id = datetime.now().strftime("%Y%m%d_%H%M")
         
-        self.log_signal.emit(f"[*] 배치 워커 스레드 시작")
-        self.log_signal.emit(f"[*] 입력 폴더: {self.input_dir}")
-        self.log_signal.emit(f"[*] 출력 폴더: {self.output_dir}")
-
-        if not os.path.exists(self.input_dir):
-            self.log_signal.emit(f"[Error] 입력 폴더를 찾을 수 없습니다: {self.input_dir}")
-            return
-
-        audio_files = [f for f in os.listdir(self.input_dir) if f.lower().endswith(('.wav', '.mp3', '.m4a'))]
-        if not audio_files:
-            self.log_signal.emit("[Error] 처리할 오디오 파일이 없습니다.")
-            return
-
+        self.log_signal.emit(f"🚀 배치 작업 시작 (Batch ID: {batch_id})")
+        
+        # Ensure directories
+        os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
-        for audio in audio_files:
-            audio_path = os.path.join(self.input_dir, audio)
-            self.log_signal.emit(f"\n[Worker] 처리를 시작합니다: {audio}")
+        # 1. Scan files
+        audio_files = []
+        for root, _, filenames in os.walk(self.input_dir):
+            for fname in filenames:
+                if fname.lower().endswith(self.audio_extensions):
+                    rel_path = os.path.relpath(os.path.join(root, fname), self.input_dir)
+                    audio_files.append((rel_path, os.path.join(root, fname)))
+        
+        if not audio_files:
+            self.log_signal.emit("⚠️ 처리할 오디오 파일이 없습니다.")
+            return
+
+        # 2. Load DB and filter
+        processed_files = self.load_processed_files()
+        work_queue = [f for f in audio_files if f[0] not in processed_files]
+        
+        self.log_signal.emit(f"[*] 총 {len(audio_files)}개 중 {len(work_queue)}개 신규 파일 처리 예정")
+
+        for rel_path, full_path in work_queue:
+            self.log_signal.emit(f"\n[Processing] {rel_path} ...")
+            start_ts = time.time()
             
-            # 파이프라인 실행 (로깅 콜백 연결)
             try:
+                # Execute Pipeline
                 final_json_path, embeddings, labels = pipeline.execute(
-                    audio_path, 
+                    full_path, 
                     self.output_dir, 
                     logger_callback=lambda msg: self.log_signal.emit(msg)
                 )
                 
-                # GUI 차트 및 뷰어 업데이트를 위한 시그널 방출
+                duration = time.time() - start_ts
+                self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS")
+                
+                # Update UI
                 self.chart_signal.emit(embeddings, labels)
                 self.finished_signal.emit(final_json_path)
+                
             except Exception as e:
-                self.log_signal.emit(f"[Error] {audio} 처리 중 오류 발생: {str(e)}")
-            
-            time.sleep(0.5)
+                duration = time.time() - start_ts
+                err_msg = str(e)
+                self.log_signal.emit(f"❌ 오류 발생: {err_msg}")
+                self.log_batch_result(rel_path, "", batch_id, duration, "FAIL", err_msg)
 
-        self.log_signal.emit("\n[Worker] 모든 배치 작업이 완료되었습니다.")
+        self.log_signal.emit(f"\n✅ 모든 배치 작업이 종료되었습니다. (ID: {batch_id})")
+
+    def load_processed_files(self):
+        processed = set()
+        if not os.path.exists(self.db_file):
+            return processed
+        try:
+            with open(self.db_file, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get("status", "").upper() == "SUCCESS":
+                        processed.add(row.get("original_filename"))
+        except:
+            pass
+        return processed
+
+    def log_batch_result(self, original_filename, output_filename, batch_id, duration, status, error=""):
+        file_exists = os.path.exists(self.db_file)
+        fieldnames = [
+            "timestamp", "original_filename", "output_filename", 
+            "batch_id", "duration", "status", "error"
+        ]
+        
+        with open(self.db_file, "a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "original_filename": original_filename,
+                "output_filename": output_filename,
+                "batch_id": batch_id,
+                "duration": f"{duration:.2f}",
+                "status": status,
+                "error": error
+            })
+        
+        if error:
+            self.log_exception(original_filename, batch_id, error)
+
+    def log_exception(self, original_filename, batch_id, error):
+        file_exists = os.path.exists(self.exception_db_file)
+        fieldnames = ["timestamp", "batch_id", "original_filename", "error"]
+        with open(self.exception_db_file, "a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "batch_id": batch_id,
+                "original_filename": original_filename,
+                "error": error
+            })

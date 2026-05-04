@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, 
-    QTreeView, QFileSystemModel, QTabWidget, QLabel, QTextEdit
+    QTreeView, QTabWidget, QLabel, QTextEdit
 )
+from PyQt6.QtGui import QFileSystemModel
 from PyQt6.QtCore import Qt, QDir
 import os
 

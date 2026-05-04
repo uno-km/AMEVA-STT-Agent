@@ -2,13 +2,14 @@ import sys
 import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QSplitter, QApplication, QFrame
+    QSplitter, QApplication
 )
 from PyQt6.QtCore import Qt
 
 from gui.panels.logging_chart import LoggingChartPanel
 from gui.panels.settings_panel import SettingsPanel
-from gui.panels.result_viewer import ResultViewerPanel
+from gui.panels.explorer_panel import ExplorerPanel
+from gui.panels.viewer_panel import ViewerPanel
 from gui.panels.batch_control import BatchControlPanel
 from src.core.settings_manager import settings_manager
 from src.utils.worker import PipelineWorker
@@ -16,8 +17,8 @@ from src.utils.worker import PipelineWorker
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AMEVA Hybrid STT Dashboard v2.0")
-        self.resize(1400, 900)
+        self.setWindowTitle("AMEVA Hybrid STT Dashboard v2.5 - Expert Edition")
+        self.resize(1700, 950)
         
         self.init_ui()
         self.apply_styles()
@@ -25,48 +26,74 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(5, 5, 5, 5)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(5, 5, 5, 5)
 
-        # 메인 가로 분할기 (좌/우)
-        main_h_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 메인 가로 분할기 (3단 구성)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # 좌측 영역 (상단: 로깅/차트, 하단: 설정)
-        left_v_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.p1 = LoggingChartPanel()
-        self.p2 = SettingsPanel()
-        left_v_splitter.addWidget(self.p1)
-        left_v_splitter.addWidget(self.p2)
-        left_v_splitter.setSizes([500, 400])
+        # 1. 왼쪽 사이드바: 익스플로러
+        self.p_explorer = ExplorerPanel()
+        self.main_splitter.addWidget(self.p_explorer)
 
-        # 우측 영역 (상단: 결과 뷰어, 하단: 배치 컨트롤)
-        right_v_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.p3 = ResultViewerPanel()
-        self.p4 = BatchControlPanel()
-        right_v_splitter.addWidget(self.p3)
-        right_v_splitter.addWidget(self.p4)
-        right_v_splitter.setSizes([600, 300])
+        # 2. 중앙 영역: 메인 뷰어 (상) / 로그 (하)
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.center_v_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        self.p_viewer = ViewerPanel()
+        self.p_log = LoggingChartPanel()
+        
+        self.center_v_splitter.addWidget(self.p_viewer)
+        self.center_v_splitter.addWidget(self.p_log)
+        self.center_v_splitter.setSizes([600, 300])
+        
+        center_layout.addWidget(self.center_v_splitter)
+        self.main_splitter.addWidget(center_widget)
 
-        main_h_splitter.addWidget(left_v_splitter)
-        main_h_splitter.addWidget(right_v_splitter)
-        main_h_splitter.setSizes([600, 800])
+        # 3. 오른쪽 사이드바: 설정 및 배치 관리
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.right_v_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        self.p_settings = SettingsPanel()
+        self.p_batch = BatchControlPanel()
+        
+        self.right_v_splitter.addWidget(self.p_settings)
+        self.right_v_splitter.addWidget(self.p_batch)
+        self.right_v_splitter.setSizes([400, 500])
+        
+        right_layout.addWidget(self.right_v_splitter)
+        self.main_splitter.addWidget(right_widget)
 
-        layout.addWidget(main_h_splitter)
+        # 초기 너비 비율 설정
+        self.main_splitter.setSizes([250, 1000, 450])
 
-        # Worker 연결
-        self.worker = None
-        self.p4.btn_run_batch.clicked.connect(self.start_pipeline)
+        main_layout.addWidget(self.main_splitter)
+
+        # --- Signal Connections ---
+        
+        # 익스플로러에서 파일 선택 시 뷰어에 표시
+        self.p_explorer.file_selected.connect(self.p_viewer.open_file_in_tab)
+        
+        # 배치 실행 버튼 클릭 시
+        self.p_batch.btn_run_batch.clicked.connect(self.start_pipeline)
 
     def start_pipeline(self):
-        input_dir = self.p4.line_input.text()
-        output_dir = self.p4.line_output.text()
+        input_dir = self.p_batch.line_input.text()
+        output_dir = self.p_batch.line_output.text()
         
         self.worker = PipelineWorker(input_dir, output_dir)
-        # 로깅 패널 연결
-        self.worker.log_signal.connect(self.p1.append_log)
-        self.worker.chart_signal.connect(self.p1.update_chart)
-        # 뷰어 패널 연결
-        self.worker.finished_signal.connect(self.p3.open_file_in_tab)
+        # 로깅 및 차트 업데이트
+        self.worker.log_signal.connect(self.p_log.append_log)
+        self.worker.chart_signal.connect(self.p_log.update_chart)
+        # 작업 완료 시 뷰어 자동 업데이트 및 배치 리스트 새로고침
+        self.worker.finished_signal.connect(self.p_viewer.open_file_in_tab)
+        self.worker.finished_signal.connect(lambda: self.p_batch.refresh_log())
         
         self.worker.start()
 
@@ -77,10 +104,19 @@ class MainWindow(QMainWindow):
             QSplitter::handle:horizontal { width: 2px; }
             QSplitter::handle:vertical { height: 2px; }
             QWidget { color: #d1d4e0; font-family: 'Segoe UI', 'Malgun Gothic'; }
+            QPushButton { 
+                background-color: #3b4252; 
+                border: 1px solid #4c566a; 
+                border-radius: 4px; 
+                padding: 5px; 
+                color: white; 
+            }
+            QPushButton:hover { background-color: #4c566a; border: 1px solid #82aaff; }
+            QLineEdit, QSpinBox, QComboBox { 
+                background-color: #1a1b26; 
+                border: 1px solid #2e3c43; 
+                padding: 4px; 
+                border-radius: 3px; 
+                color: #d1d4e0; 
+            }
         """)
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
