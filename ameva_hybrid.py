@@ -616,6 +616,8 @@ def main():
         env_manager.whisper_cmd, 
         "-m", active_whisper_model, 
         "-f", env_manager.audio_file, 
+        "-ml", "500",    # 문장 최대 길이를 제한 (밀리초 단위 아님, 글자수/토큰 기준 유동적)
+        "-sow",          # 문장 단위로 더 정밀하게 분리 시도
         "-oj", "-nt"
     ]
 
