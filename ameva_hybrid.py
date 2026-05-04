@@ -1,5 +1,5 @@
 import sys
-# Bypass OS platform check in Vosk for Android/Termux
+# 안드로이드(Termux) 환경에서의 OS 플랫폼 검증 우회
 sys.platform = 'linux'
 
 import os
@@ -9,10 +9,13 @@ import math
 import subprocess
 import time
 import argparse
+import random
 from vosk import Model, SpkModel, KaldiRecognizer
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # ==========================================
-# 1. Configuration
+# 1. 시스템 환경 설정 (Configuration)
 # ==========================================
 AUDIO_FILE = "/data/data/com.termux/files/home/projects/stt_benchmark/samples/test_cut_2.wav"
 WHISPER_CMD = "/data/data/com.termux/files/home/projects/stt_benchmark/whisper.cpp/main"
@@ -20,7 +23,7 @@ WHISPER_MODEL_SMALL = "/data/data/com.termux/files/home/projects/stt_benchmark/w
 WHISPER_MODEL_MEDIUM = "/data/data/com.termux/files/home/projects/stt_benchmark/whisper.cpp/models/ggml-medium.bin"
 
 # ==========================================
-# 2. Vector Operations (Pure Python)
+# 2. 순수 파이썬 기반 수학 연산 (Vector Operations)
 # ==========================================
 def cosine_similarity(v1, v2):
     dot_product = sum(a * b for a, b in zip(v1, v2))
@@ -29,18 +32,115 @@ def cosine_similarity(v1, v2):
     if mag1 == 0 or mag2 == 0: return 0.0
     return dot_product / (mag1 * mag2)
 
+def compute_mean_vector(vectors):
+    return [sum(col) / len(col) for col in zip(*vectors)]
+
+def kmeans_clustering_k(vectors, k=2, max_iter=10):
+    if not vectors: 
+        return []
+    num_vectors = len(vectors)
+    
+    if num_vectors <= k:
+        return list(range(num_vectors))
+
+    centroids = random.sample(vectors, k)
+    labels = []
+    
+    for _ in range(max_iter):
+        labels = []
+        clusters = {i: [] for i in range(k)}
+        
+        for v in vectors:
+            similarities = [cosine_similarity(v, c) for c in centroids]
+            best_cluster_idx = similarities.index(max(similarities))
+            
+            labels.append(best_cluster_idx)
+            clusters[best_cluster_idx].append(v)
+            
+        for i in range(k):
+            if clusters[i]:
+                centroids[i] = compute_mean_vector(clusters[i])
+                
+    return labels
+
+
+def save_visualization(whisper_segments, vosk_speakers, output_prefix="ameva_result"):
+    # Build speaker id list (exclude unknown -1)
+    speaker_ids = sorted({v.get('speaker_id', -1) for v in vosk_speakers if v.get('speaker_id', -1) != -1})
+    if not speaker_ids:
+        speaker_ids = [0]
+
+    id_to_y = {sid: i for i, sid in enumerate(speaker_ids)}
+    unknown_y = len(speaker_ids)
+
+    fig, ax = plt.subplots(figsize=(12, 2 + len(speaker_ids)))
+    cmap = plt.get_cmap('tab10')
+
+    # Plot Vosk speaker segments as horizontal bars
+    for v in vosk_speakers:
+        sid = v.get('speaker_id', -1)
+        y = id_to_y.get(sid, unknown_y)
+        start = v.get('start', 0)
+        end = v.get('end', start)
+        width = max(0.001, end - start)
+        color = cmap(sid % 10) if sid != -1 else 'gray'
+        rect = patches.Rectangle((start, y - 0.3), width, 0.6, facecolor=color, alpha=0.6, edgecolor='k')
+        ax.add_patch(rect)
+
+    # Plot Whisper segments as text labels positioned at matched speaker row
+    for w in whisper_segments:
+        sid = w.get('speaker_id', -1)
+        y = id_to_y.get(sid, unknown_y)
+        x = (w['start'] + w['end']) / 2.0
+        txt = w.get('text', '')
+        ax.text(x, y, txt if len(txt) < 120 else txt[:117] + '...', ha='center', va='center', fontsize=8, wrap=True)
+
+    # Configure axes
+    max_time = 0.0
+    if vosk_speakers:
+        max_time = max(max_time, max(v.get('end', 0) for v in vosk_speakers))
+    if whisper_segments:
+        max_time = max(max_time, max(w.get('end', 0) for w in whisper_segments))
+
+    ax.set_xlim(0, max_time + 0.5)
+    ax.set_ylim(-1, len(speaker_ids) + 0.5)
+    y_ticks = list(range(len(speaker_ids)))
+    ax.set_yticks(y_ticks + [unknown_y])
+    ax.set_yticklabels([f"Speaker {s}" for s in speaker_ids] + ["Unknown"])
+    ax.set_xlabel('Time (s)')
+    ax.set_title('Speaker Diarization and Transcript Mapping')
+    plt.tight_layout()
+
+    jpg_path = f"{output_prefix}.jpg"
+    fig.savefig(jpg_path, dpi=150)
+    plt.close(fig)
+
+    # Save JSON result for inspection
+    json_path = f"{output_prefix}.json"
+    with open(json_path, 'w', encoding='utf-8') as jf:
+        json.dump({"whisper_segments": whisper_segments, "vosk_speakers": vosk_speakers}, jf, ensure_ascii=False, indent=2)
+
+    print(f"[OUTPUT] Saved visualization: {jpg_path}")
+    print(f"[OUTPUT] Saved JSON result: {json_path}")
+
 # ==========================================
-# Main Execution
+# 3. 메인 프로세스 (Main Execution)
 # ==========================================
 def main():
-    # CLI Arguments Setup
+    # CLI 파라미터(Args) 설정
     parser = argparse.ArgumentParser(description="AMEVA Hybrid STT Engine (Whisper + Vosk)")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--small", action="store_true", help="Use small whisper model (default)")
-    group.add_argument("--medium", action="store_true", help="Use medium whisper model")
+    group.add_argument("--small", action="store_true", help="Small 모델 사용 (기본값)")
+    group.add_argument("--medium", action="store_true", help="Medium 모델 사용")
+    
+    # [핵심] 사용자가 입력 안 하면 알아서 기본값(default) 적용
+    parser.add_argument("--speakers", type=int, default=2, help="오디오 내 예상 화자 수 지정 (기본값: 2)")
+    parser.add_argument("--max_offset", type=float, default=3.0, help="매핑 허용 최대 오차 시간(초) (기본값: 3.0)")
+    parser.add_argument("--output", type=str, default="ameva_result", help="결과 출력 파일 접두사 (예: ameva_result)")
+    
     args = parser.parse_args()
 
-    # Model Selection
+    # 모델 라우팅 로직
     if args.medium:
         active_whisper_model = WHISPER_MODEL_MEDIUM
         model_name = "Medium"
@@ -48,16 +148,17 @@ def main():
         active_whisper_model = WHISPER_MODEL_SMALL
         model_name = "Small"
 
-    print("[SYSTEM] Initiating AMEVA Hybrid STT Engine (Whisper + Vosk)")
-    print(f"[SYSTEM] Target Audio: {AUDIO_FILE}")
-    print(f"[SYSTEM] Active Whisper Model: {model_name} ({active_whisper_model})")
+    print("[SYSTEM] AMEVA Hybrid STT Engine 프로세스 시작")
+    print(f"[SYSTEM] 대상 오디오: {AUDIO_FILE}")
+    print(f"[SYSTEM] 적용 모델: Whisper {model_name}")
+    print(f"[SYSTEM] 설정된 화자 수: {args.speakers}명 / 허용 오차: {args.max_offset}초")
     
     total_start_time = time.time()
 
     # ------------------------------------------
     # Phase 1: Whisper.cpp Transcription
     # ------------------------------------------
-    print("\n[Phase 1] Executing Whisper.cpp for transcription...")
+    print("\n[Phase 1] Whisper.cpp 전사 작업 수행 중...")
     phase1_start = time.time()
     
     subprocess.run([
@@ -69,7 +170,7 @@ def main():
 
     whisper_json_file = AUDIO_FILE + ".json"
     if not os.path.exists(whisper_json_file):
-        print("[ERROR] Whisper JSON output not found.")
+        print("[ERROR] Whisper JSON 결과물을 찾을 수 없습니다.")
         sys.exit(1)
 
     with open(whisper_json_file, "r", encoding="utf-8") as f:
@@ -83,26 +184,27 @@ def main():
         if text:
             whisper_segments.append({"start": start_sec, "end": end_sec, "text": text})
             
+    os.remove(whisper_json_file)
     phase1_end = time.time()
-    print(f"[Phase 1] Completed in {phase1_end - phase1_start:.2f} seconds.")
+    print(f"[Phase 1] 완료 (소요 시간: {phase1_end - phase1_start:.2f}초)")
 
     # ------------------------------------------
     # Phase 2: Vosk Speaker Diarization
     # ------------------------------------------
-    print("\n[Phase 2] Executing Vosk for speaker vector extraction...")
+    print("\n[Phase 2] Vosk 화자 임베딩(X-Vector) 추출 중...")
     phase2_start = time.time()
     
     try:
         model = Model("models/ko-model")
         spk_model = SpkModel("models/spk-model")
     except Exception as e:
-        print(f"[ERROR] Failed to load Vosk models. Ensure 'models/ko-model' and 'models/spk-model' exist. Details: {e}")
+        print(f"[ERROR] 모델 로드 실패: {e}")
         sys.exit(1)
 
     try:
         wf = wave.open(AUDIO_FILE, "rb")
     except FileNotFoundError:
-        print(f"[ERROR] Audio file not found at {AUDIO_FILE}")
+        print(f"[ERROR] 오디오 파일 탐색 실패: {AUDIO_FILE}")
         sys.exit(1)
         
     rec = KaldiRecognizer(model, wf.getframerate(), spk_model)
@@ -131,50 +233,64 @@ def main():
         })
         
     phase2_end = time.time()
-    print(f"[Phase 2] Completed in {phase2_end - phase2_start:.2f} seconds.")
+    print(f"[Phase 2] 완료 (소요 시간: {phase2_end - phase2_start:.2f}초)")
 
     # ------------------------------------------
-    # Phase 3: Timeline Synchronization (Merge)
+    # Phase 3: Timeline Synchronization & K-Means Clustering
     # ------------------------------------------
-    print("\n[Phase 3] Synchronizing timelines and clustering speakers...")
+    print("\n[Phase 3] 시계열 동기화 및 K-Means 화자 군집화 수행 중...")
     phase3_start = time.time()
-    
-    speaker_a_ref = vosk_speakers[0]['vector'] if vosk_speakers else None
+
+    all_vectors = [v['vector'] for v in vosk_speakers]
+    cluster_labels = kmeans_clustering_k(all_vectors, k=args.speakers)
+
+    for i, v_seg in enumerate(vosk_speakers):
+        v_seg['speaker_id'] = cluster_labels[i]
 
     print("\n============================================================")
-    print("[RESULT] AMEVA Hybrid STT Output")
+    print("[결과] AMEVA 하이브리드 STT 출력 파이프라인")
     print("============================================================")
 
     for w_seg in whisper_segments:
-        w_start = w_seg['start']
         w_mid = (w_seg['start'] + w_seg['end']) / 2.0
         
-        matched_vector = None
-        for v_seg in vosk_speakers:
-            if v_seg['start'] <= w_mid <= v_seg['end']:
-                matched_vector = v_seg['vector']
-                break
+        matched_speaker_id = -1
+        current_min_diff = float('inf')
         
-        current_speaker = "Unknown"
-        if matched_vector and speaker_a_ref:
-            similarity = cosine_similarity(speaker_a_ref, matched_vector)
-            if similarity > 0.5:
-                current_speaker = "Speaker A"
-            else:
-                current_speaker = "Speaker B"
+        for v_seg in vosk_speakers:
+            v_mid = (v_seg['start'] + v_seg['end']) / 2.0
+            time_diff = abs(w_mid - v_mid)
+            
+            # 조건 1: 시간 구간에 완벽히 포함되는 경우
+            if v_seg['start'] <= w_mid <= v_seg['end']:
+                matched_speaker_id = v_seg['speaker_id']
+                break
                 
-        print(f"[{w_seg['start']:>5.1f}s - {w_seg['end']:>5.1f}s] [{current_speaker}] : {w_seg['text']}")
+            # 조건 2: 겹치지는 않지만, args.max_offset 이내에서 가장 가까운 경우
+            elif time_diff <= args.max_offset and time_diff < current_min_diff:
+                current_min_diff = time_diff
+                matched_speaker_id = v_seg['speaker_id']
+        
+        # 매핑 실패 방어 로직 적용
+        w_seg['speaker_id'] = matched_speaker_id
+        speaker_label = f"Speaker {matched_speaker_id}" if matched_speaker_id != -1 else "Unknown"
+        print(f"[{w_seg['start']:>5.1f}s - {w_seg['end']:>5.1f}s] [{speaker_label}] : {w_seg['text']}")
 
     print("============================================================")
     
     phase3_end = time.time()
     total_end_time = time.time()
+    # 저장: 시각화(JPG) 및 JSON 결과
+    try:
+        save_visualization(whisper_segments, vosk_speakers, output_prefix=args.output)
+    except Exception as e:
+        print(f"[WARN] 시각화 저장 중 오류: {e}")
     
-    print(f"\n[PROFILING] Execution Time Summary")
+    print(f"\n[성능 프로파일링] 프로세스 실행 시간 요약")
     print(f"  - Phase 1 (Whisper ASR) : {phase1_end - phase1_start:.2f} sec")
     print(f"  - Phase 2 (Vosk Spk)    : {phase2_end - phase2_start:.2f} sec")
-    print(f"  - Phase 3 (Merge)       : {phase3_end - phase3_start:.2f} sec")
-    print(f"  - Total Execution Time  : {total_end_time - total_start_time:.2f} sec")
+    print(f"  - Phase 3 (Clustering)  : {phase3_end - phase3_start:.2f} sec")
+    print(f"  - 총 소요 시간          : {total_end_time - total_start_time:.2f} sec")
 
 if __name__ == "__main__":
     main()
