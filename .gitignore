@@ -31,7 +31,10 @@ docker/data/
 # STT Logs & Outputs
 db/*.csv
 outputs/
+output_results/
 output_audios/
 input_audios/
 db/clusters/
 *_converted.wav
+TASK-*
+**/TASK-*
