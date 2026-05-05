@@ -1,0 +1,2 @@
+timestamp,original_filename,output_filename,batch_id,duration,status,error,cluster_db_path,model,language,threads,speakers,max_offset,max_len,split_on_word,vad_enabled,task_id
+2026-05-05 23:40:40,test_cut_2.wav,C:\ameva\AMEVA-STT-Agent\output_results\TASK-0001_test_cut_2.json,20260505_2335,306.39,SUCCESS,,c:\ameva\AMEVA-STT-Agent\db\clusters\TASK-0001_test_cut_2_clusters.json,large,ko,8,3,1.5,15,True,False,TASK-0001
