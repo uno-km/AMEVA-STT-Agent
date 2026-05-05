@@ -4,7 +4,16 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
 from datetime import datetime
+import matplotlib.font_manager as fm
+import matplotlib
 
+# Windows 한글 폰트 설정 (맑은 고딕)
+try:
+    font_name = "Malgun Gothic"
+    matplotlib.rc('font', family=font_name)
+    matplotlib.rcParams['axes.unicode_minus'] = False
+except:
+    pass
 class LoggingChartPanel(QWidget):
     def __init__(self):
         super().__init__()

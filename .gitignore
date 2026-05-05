@@ -27,3 +27,11 @@ Desktop.ini
 results/
 samples/
 docker/data/
+
+# STT Logs & Outputs
+db/*.csv
+outputs/
+output_audios/
+input_audios/
+db/clusters/
+*_converted.wav

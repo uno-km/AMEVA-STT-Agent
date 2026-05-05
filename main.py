@@ -9,8 +9,11 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 
 def main():
     try:
-        print("1. Freeze support")
         multiprocessing.freeze_support()
+        try:
+            multiprocessing.set_start_method("spawn", force=True)
+        except RuntimeError:
+            pass # Already set or not supported
         
         print("2. Importing QApplication")
         from PyQt6.QtWidgets import QApplication

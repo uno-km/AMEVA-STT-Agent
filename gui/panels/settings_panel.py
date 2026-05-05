@@ -229,7 +229,7 @@ class SettingsPanel(QWidget):
         
         settings_manager.save()
         QMessageBox.information(self, "저장 완료", "설정이 성공적으로 저장되었습니다.")
-        self.update_model_list() # 상태 새로고침
+        self.load_from_json() # 상태 새로고침 및 선택 복구
 
     def start_download(self):
         # 실제 모델명만 추출
