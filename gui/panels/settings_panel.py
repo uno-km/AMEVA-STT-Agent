@@ -214,6 +214,9 @@ class SettingsPanel(QWidget):
             if os.path.exists(base_dir):
                 for f in os.listdir(base_dir):
                     if f.startswith(base_filename) and f.endswith(".bin") and os.path.getsize(os.path.join(base_dir, f)) > 1024*1024:
+                        # 'large' 검색 시 'turbo'가 포함된 파일은 제외 (중복 체크 방지)
+                        if m == "large" and "-turbo" in f:
+                            continue
                         exists = True
                         break
             
