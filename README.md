@@ -151,4 +151,4 @@ docker-compose -f docker/docker-compose.yml up --build -d
 
 ---
 
-© 2024 AMEVA Project. All rights reserved.
+© 2026 AMEVA Project. All rights reserved.
