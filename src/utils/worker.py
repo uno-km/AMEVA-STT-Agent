@@ -20,8 +20,14 @@ class PipelineWorker(QThread):
         
         # Load batch DB info from settings
         batch_settings = settings_manager.get("batch")
-        self.db_file = batch_settings.get("db_file", "stt_batch_log.csv")
-        self.exception_db_file = batch_settings.get("exception_db_file", "stt_exception_log.csv")
+        self.db_file = batch_settings.get("db_file", r"C:\ameva\AMEVA-STT-Agent\db\stt_batch_log.csv")
+        self.exception_db_file = batch_settings.get("exception_db_file", r"C:\ameva\AMEVA-STT-Agent\db\stt_exception_log.csv")
+        self.cluster_mapping_file = batch_settings.get("cluster_mapping_file", r"C:\ameva\AMEVA-STT-Agent\db\cluster_mapping.csv")
+        
+        # Ensure DB directory exists
+        db_dir = os.path.dirname(self.db_file)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         self.audio_extensions = (".wav", ".m4a", ".mp3", ".flac", ".aac", ".ogg", ".opus")
         self.task_id_counter = self._load_next_task_id()
 
@@ -117,7 +123,8 @@ class PipelineWorker(QThread):
                     logger_callback=lambda msg: self.log_signal.emit(msg),
                     system_callback=lambda msg: self.system_log_signal.emit(msg),
                     task_id=task_id_str,
-                    diarization_enabled=stt_config.get("diarization_enabled", True)
+                    diarization_enabled=stt_config.get("diarization_enabled", True),
+                    batch_id=batch_id
                 )
                 
                 # 요약 정보 수집
@@ -230,8 +237,11 @@ class PipelineWorker(QThread):
             self.log_exception(original_filename, batch_id, error)
 
     def _write_cluster_mapping(self, task_id, original_filename, cluster_path):
-        mapping_file = "db/cluster_mapping.csv"
+        mapping_file = self.cluster_mapping_file
         fieldnames = ["task_id", "original_filename", "cluster_db_path"]
+        db_dir = os.path.dirname(mapping_file)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         exists = os.path.exists(mapping_file)
         with open(mapping_file, "a", encoding="utf-8", newline="") as mf:
             writer = csv.DictWriter(mf, fieldnames=fieldnames)

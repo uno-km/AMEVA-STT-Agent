@@ -8,6 +8,11 @@ class SettingsManager(QObject):
     def __init__(self):
         super().__init__()
         self.settings_file = "settings.json"
+        
+        # 기본 경로 설정
+        base_dir = r"C:\ameva\AMEVA-STT-Agent"
+        db_dir = os.path.join(base_dir, "db")
+        
         self.default_settings = {
             "theme": "dark",
             "models_dir": r"C:\ameva\AI_Models",
@@ -26,12 +31,12 @@ class SettingsManager(QObject):
                 "vad_min_silence_duration": 500
             },
             "batch": {
-                "input_dir": r"C:\ameva\AMEVA-STT-Agent\input_audios",
-                "output_dir": r"C:\ameva\AMEVA-STT-Agent\output_results",
+                "input_dir": os.path.join(base_dir, "input_audios"),
+                "output_dir": os.path.join(base_dir, "output_results"),
                 "interval_min": 1,
                 "auto_mode": False,
-                "db_file": "stt_batch_log.csv",
-                "exception_db_file": "stt_exception_log.csv"
+                "db_file": os.path.join(db_dir, "stt_batch_log.csv"),
+                "exception_db_file": os.path.join(db_dir, "stt_exception_log.csv")
             },
             "ui": {
                 "splitter_pos": [400, 400, 400, 400]
@@ -51,6 +56,13 @@ class SettingsManager(QObject):
             self.save()
 
     def save(self):
+        # 저장 전 디렉토리 확인 (특히 DB 폴더)
+        db_file = self.settings.get("batch", {}).get("db_file", "")
+        if db_file:
+            db_dir = os.path.dirname(db_file)
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+            
         with open(self.settings_file, "w", encoding="utf-8") as f:
             json.dump(self.settings, f, indent=4, ensure_ascii=False)
         self.settings_changed.emit(self.settings)
@@ -65,6 +77,7 @@ class SettingsManager(QObject):
     def get(self, *keys):
         d = self.settings
         for k in keys:
+            if not isinstance(d, dict): return {}
             d = d.get(k, {})
         return d
 

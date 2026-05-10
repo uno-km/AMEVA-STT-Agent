@@ -253,7 +253,7 @@ class STTPipeline:
             if log_callback: log_callback(f"[Error] ffmpeg 변환 실패: {str(e)}")
             raise RuntimeError(f"ffmpeg 변환 실패: {str(e)}") from e
 
-    def execute(self, audio_path, output_dir, logger_callback=None, system_callback=None, task_id=None, diarization_enabled=True):
+    def execute(self, audio_path, output_dir, logger_callback=None, system_callback=None, task_id=None, diarization_enabled=True, batch_id=None):
         def log(msg): 
             if logger_callback: logger_callback(msg)
         def sys_log(msg): 
@@ -349,6 +349,8 @@ class STTPipeline:
         final_json_path = os.path.join(output_dir, f"{base_name}.json")
         final_txt_path = os.path.join(output_dir, f"{base_name}.txt")
         db_dir = r"c:\ameva\AMEVA-STT-Agent\db\clusters"
+        if batch_id:
+            db_dir = os.path.join(db_dir, batch_id)
         os.makedirs(db_dir, exist_ok=True)
         final_cluster_path = os.path.join(db_dir, f"{base_name}_clusters.json")
 

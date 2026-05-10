@@ -167,7 +167,7 @@ class BatchControlPanel(QWidget):
             self.run_requested.emit()
 
     def refresh_log(self):
-        db_file = settings_manager.get("batch").get("db_file", "stt_batch_log.csv")
+        db_file = settings_manager.get("batch").get("db_file", r"C:\ameva\AMEVA-STT-Agent\db\stt_batch_log.csv")
         if not os.path.exists(db_file):
             return
 

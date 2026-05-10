@@ -20,6 +20,11 @@ def main():
         print("3. Creating QApplication")
         app = QApplication(sys.argv)
         
+        # Set default font to avoid legacy font issues (Fixedsys error)
+        from PyQt6.QtGui import QFont
+        font = QFont("Malgun Gothic", 10)
+        app.setFont(font)
+        
         print("4. Importing MainWindow")
         from gui.main_window import MainWindow
         
