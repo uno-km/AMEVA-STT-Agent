@@ -2,7 +2,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QComboBox, 
     QPushButton, QLabel, QCheckBox, QSpinBox, QMessageBox, QFrame,
-    QHBoxLayout, QProgressBar, QDoubleSpinBox, QScrollArea
+    QHBoxLayout, QProgressBar, QDoubleSpinBox, QScrollArea, QFileDialog
 )
 from PyQt6.QtCore import pyqtSignal
 from src.core.settings_manager import settings_manager
@@ -51,6 +51,7 @@ class SettingsPanel(QWidget):
         form.addRow(model_label)
 
         self.combo_model = QComboBox()
+        self.combo_model.currentIndexChanged.connect(self.on_model_changed)
         self.btn_download = QPushButton("📥 다운로드")
         self.btn_download.setFixedWidth(100)
         self.btn_download.clicked.connect(self.start_download)
@@ -78,6 +79,10 @@ class SettingsPanel(QWidget):
         dia_label = QLabel("Diarization (화자 분리 설정)")
         dia_label.setStyleSheet("font-weight: bold; color: #ffcb6b; margin-top: 15px;")
         form.addRow(dia_label)
+
+        self.check_diarization = QCheckBox("화자분리 활성화 (Vosk 엔진)")
+        self.check_diarization.setStyleSheet("color: #ffcb6b; font-weight: bold;")
+        form.addRow("활성화:", self.check_diarization)
 
         self.spin_speakers = QSpinBox()
         self.spin_speakers.setRange(0, 10)
@@ -158,6 +163,13 @@ class SettingsPanel(QWidget):
         
         s = settings_manager.get("stt")
         current_model = s.get("model", "medium")
+
+        self.combo_model.blockSignals(True)
+        # 만약 설정된 모델이 커스텀 파일 경로인데 리스트에 없다면 추가
+        if os.path.isfile(current_model) and self.combo_model.findData(current_model) == -1:
+            basename = os.path.basename(current_model)
+            self.combo_model.insertItem(0, f"⭐ {basename}", current_model)
+
         # 데이터(UserData) 기반으로 매칭되는 항목 찾기
         index = self.combo_model.findData(current_model)
         if index >= 0:
@@ -168,11 +180,13 @@ class SettingsPanel(QWidget):
                 if current_model in self.combo_model.itemText(i):
                     self.combo_model.setCurrentIndex(i)
                     break
+        self.combo_model.blockSignals(False)
         
         self.combo_lang.setCurrentText(s.get("language", "ko"))
         self.spin_threads.setValue(s.get("threads", 4))
         
         # Expert fields
+        self.check_diarization.setChecked(s.get("diarization_enabled", True))
         self.spin_speakers.setValue(s.get("speakers", 2))
         self.spin_offset.setValue(s.get("max_offset", 2.0))
         self.spin_max_len.setValue(s.get("max_len", 20))
@@ -205,6 +219,8 @@ class SettingsPanel(QWidget):
             
             display_text = f"{m} {'✅' if exists else '❌'}"
             self.combo_model.addItem(display_text, m)
+            
+        self.combo_model.addItem("📂 기타 모델 선택...", "custom")
 
     def save_to_json(self):
         # UserData에서 실제 모델명(small, medium 등) 직접 추출
@@ -217,6 +233,7 @@ class SettingsPanel(QWidget):
         settings_manager.settings["stt"]["threads"] = self.spin_threads.value()
         
         # Expert fields save
+        settings_manager.settings["stt"]["diarization_enabled"] = self.check_diarization.isChecked()
         settings_manager.settings["stt"]["speakers"] = self.spin_speakers.value()
         settings_manager.settings["stt"]["max_offset"] = self.spin_offset.value()
         settings_manager.settings["stt"]["max_len"] = self.spin_max_len.value()
@@ -262,3 +279,33 @@ class SettingsPanel(QWidget):
             QMessageBox.information(self, "다운로드 완료", f"{self.downloader.model_name} 모델이 설치되었습니다.")
         else:
             QMessageBox.warning(self, "다운로드 실패", "모델 다운로드 중 오류가 발생했습니다.")
+
+    def on_model_changed(self, index):
+        data = self.combo_model.itemData(index)
+        if data == "custom":
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Whisper 모델 선택 (.bin)", 
+                r"C:\ameva\AI_Models", "GGML Model (*.bin)"
+            )
+            if file_path:
+                # 커스텀 경로 저장 및 표시
+                settings_manager.settings["stt"]["custom_model_path"] = file_path
+                basename = os.path.basename(file_path)
+                
+                self.combo_model.blockSignals(True) # 시그널 일시 차단
+                # 이미 리스트에 있으면 중복 추가 방지
+                existing_index = self.combo_model.findData(file_path)
+                if existing_index == -1:
+                    self.combo_model.insertItem(0, f"⭐ {basename}", file_path)
+                    self.combo_model.setCurrentIndex(0)
+                else:
+                    self.combo_model.setCurrentIndex(existing_index)
+                self.combo_model.blockSignals(False) # 시그널 재개
+            else:
+                # 취소 시: 현재 'custom'이 선택된 상태이므로, 이전 저장된 모델로 복구
+                self.combo_model.blockSignals(True)
+                current_model = settings_manager.get("stt").get("model", "medium")
+                idx = self.combo_model.findData(current_model)
+                if idx >= 0:
+                    self.combo_model.setCurrentIndex(idx)
+                self.combo_model.blockSignals(False)

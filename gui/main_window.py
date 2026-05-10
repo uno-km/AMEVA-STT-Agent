@@ -2,7 +2,7 @@ import sys
 import os
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QSplitter, QApplication
+    QSplitter, QApplication, QInputDialog
 )
 from PyQt6.QtCore import Qt
 
@@ -90,8 +90,8 @@ class MainWindow(QMainWindow):
         self.p_explorer.file_selected.connect(self.p_viewer.open_file_in_tab)
         
         # 배치 실행 버튼 및 자동 타이머 신호 연결
-        self.p_batch.btn_run_batch.clicked.connect(self.start_pipeline)
-        self.p_batch.run_requested.connect(self.start_pipeline)
+        self.p_batch.btn_run_batch.clicked.connect(lambda: self.start_pipeline(is_automated=False))
+        self.p_batch.run_requested.connect(lambda: self.start_pipeline(is_automated=True))
         
         # 모델 다운로드 로그 -> SYSTEM 탭 연결
         self.p_settings.download_log_signal.connect(self.p_log.append_system_log)
@@ -135,15 +135,33 @@ class MainWindow(QMainWindow):
         else:
             self.p_log.append_system_log(f"⚠️ 매핑된 군집화 DB 정보를 찾을 수 없습니다: {file_name}")
 
-    def start_pipeline(self):
+    def start_pipeline(self, is_automated=False):
         if self.worker and self.worker.isRunning():
             self.p_log.append_log("⚠️ 이미 분석 작업이 진행 중입니다. 현재 작업 완료 후 다음 주기에 시작합니다.")
             return
 
         input_dir = self.p_batch.line_input.text()
-        output_dir = self.p_batch.line_output.text()
+        output_base_dir = self.p_batch.line_output.text()
         
-        self.worker = PipelineWorker(input_dir, output_dir)
+        batch_name = ""
+        if not is_automated:
+            text, ok = QInputDialog.getText(self, "작업 시작", "작업명을 입력하세요:", text="")
+            if not ok: return # 취소 시 중단
+            batch_name = text.strip()
+
+        # 폴더명 및 경로 확정
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if not batch_name:
+            # 입력이 없는 경우: 시분초밀리섹 + TASK ID (워커 내부에서 처리하되 폴더는 미리 생성)
+            folder_name = f"BATCH_{timestamp}"
+        else:
+            # 입력이 있는 경우: 입력값 + 시분초
+            folder_name = f"{batch_name}_{timestamp}"
+            
+        actual_output_dir = os.path.join(output_base_dir, folder_name)
+        os.makedirs(actual_output_dir, exist_ok=True)
+
+        self.worker = PipelineWorker(input_dir, actual_output_dir, batch_name=batch_name)
         # 로깅 및 차트 업데이트
         self.worker.log_signal.connect(self.p_log.append_log)
         self.worker.system_log_signal.connect(self.p_log.append_system_log) # 시스템 탭 연결 추가
@@ -153,6 +171,7 @@ class MainWindow(QMainWindow):
         self.worker.finished_signal.connect(lambda: self.p_batch.refresh_log())
         
         self.worker.start()
+        self.p_log.append_system_log(f"📁 작업 폴더 생성: {actual_output_dir}")
 
     def apply_theme(self, theme_name):
         if theme_name == "light":

@@ -69,24 +69,29 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
             output_queue.put(("log", msg))
     
     try:
-        model_dir = r"C:\ameva\AI_Models\ggml"
-        os.makedirs(model_dir, exist_ok=True)
-        
-        base_filename = f"ggml-{model_size}"
-        if model_size == "turbo": base_filename = "ggml-large-v3-turbo"
-        elif model_size == "large": base_filename = "ggml-large-v3"
-        
         model_path = None
-        if os.path.exists(model_dir):
-            for f in os.listdir(model_dir):
-                if f.startswith(base_filename) and f.endswith(".bin") and os.path.getsize(os.path.join(model_dir, f)) > 1024*1024:
-                    model_path = os.path.join(model_dir, f)
-                    break
-        
-        # pywhispercpp가 인식할 수 있는 모델 이름으로 매핑
-        model_name = model_size
-        if model_size == "turbo": model_name = "large-v3-turbo"
-        elif model_size == "large": model_name = "large-v3"
+        # 사용자 지정 경로 여부 확인 (파일 시스템에 직접 존재하는 경우)
+        if os.path.isfile(model_size):
+            model_path = model_size
+            model_name = os.path.basename(model_path)
+        else:
+            model_dir = r"C:\ameva\AI_Models\ggml"
+            os.makedirs(model_dir, exist_ok=True)
+            
+            base_filename = f"ggml-{model_size}"
+            if model_size == "turbo": base_filename = "ggml-large-v3-turbo"
+            elif model_size == "large": base_filename = "ggml-large-v3"
+            
+            if os.path.exists(model_dir):
+                for f in os.listdir(model_dir):
+                    if f.startswith(base_filename) and f.endswith(".bin") and os.path.getsize(os.path.join(model_dir, f)) > 1024*1024:
+                        model_path = os.path.join(model_dir, f)
+                        break
+            
+            # pywhispercpp가 인식할 수 있는 모델 이름으로 매핑
+            model_name = model_size
+            if model_size == "turbo": model_name = "large-v3-turbo"
+            elif model_size == "large": model_name = "large-v3"
 
         if not model_path:
             output_queue.put(("system", f"⚠️ 유효한 모델 파일 없음. 신규 다운로드 시도: {model_name}"))
@@ -248,7 +253,7 @@ class STTPipeline:
             if log_callback: log_callback(f"[Error] ffmpeg 변환 실패: {str(e)}")
             raise RuntimeError(f"ffmpeg 변환 실패: {str(e)}") from e
 
-    def execute(self, audio_path, output_dir, logger_callback=None, system_callback=None, task_id=None):
+    def execute(self, audio_path, output_dir, logger_callback=None, system_callback=None, task_id=None, diarization_enabled=True):
         def log(msg): 
             if logger_callback: logger_callback(msg)
         def sys_log(msg): 
@@ -287,47 +292,56 @@ class STTPipeline:
             log("[Error] STT 결과가 없습니다.")
             return None, [], [], None, []
 
-        log(f"[Pipeline] STT 완료. {len(stt_data)}개 문장 기반 Forced Diarization 시작...")
+        if diarization_enabled:
+            log(f"[Pipeline] STT 완료. {len(stt_data)}개 문장 기반 Forced Diarization 시작...")
 
-        # Phase 2: Forced Diarization
-        p_dia = multiprocessing.Process(target=worker_diarization_forced, args=(processed_audio, stt_data, q))
-        p_dia.start()
-        
-        dia_vectors_list, valid_indices = [], []
-        while p_dia.is_alive() or not q.empty():
-            try:
-                key, val = q.get(timeout=0.5)
-                if key == "log": log(val)
-                elif key == "system": sys_log(val)
-                elif key == "dia_result": dia_vectors_list, valid_indices = val
-            except queue.Empty:
-                if p_dia.exitcode is not None and p_dia.exitcode != 0:
-                    log(f"❌ DIA 프로세스 비정상 종료 (exitcode={p_dia.exitcode})")
-                    break
-        p_dia.join()
-        
-        log(f"[Pipeline] Diarization 완료. K-Means 군집화(K={num_speakers}) 시작...")
-        
-        if dia_vectors_list:
-            labels, centroids = kmeans_clustering(dia_vectors_list, k=num_speakers)
-            pca_coords = pca_reduce(dia_vectors_list)
+            # Phase 2: Forced Diarization
+            p_dia = multiprocessing.Process(target=worker_diarization_forced, args=(processed_audio, stt_data, q))
+            p_dia.start()
+            
+            dia_vectors_list, valid_indices = [], []
+            while p_dia.is_alive() or not q.empty():
+                try:
+                    key, val = q.get(timeout=0.5)
+                    if key == "log": log(val)
+                    elif key == "system": sys_log(val)
+                    elif key == "dia_result": dia_vectors_list, valid_indices = val
+                except queue.Empty:
+                    if p_dia.exitcode is not None and p_dia.exitcode != 0:
+                        log(f"❌ DIA 프로세스 비정상 종료 (exitcode={p_dia.exitcode})")
+                        break
+            p_dia.join()
+            
+            log(f"[Pipeline] Diarization 완료. K-Means 군집화(K={num_speakers}) 시작...")
+            
+            if dia_vectors_list:
+                labels, centroids = kmeans_clustering(dia_vectors_list, k=num_speakers)
+                pca_coords = pca_reduce(dia_vectors_list)
+            else:
+                labels, centroids, pca_coords = [], [], []
+
+            for seg in stt_data: seg["speaker"] = "Unknown"
+            for vector_idx, stt_idx in enumerate(valid_indices):
+                best_label = labels[vector_idx]
+                stt_data[stt_idx]["speaker"] = f"Speaker {best_label}"
         else:
-            labels, centroids, pca_coords = [], [], []
+            log("[Pipeline] 화자분리(Diarization)가 비활성화되었습니다. STT 결과만 생성합니다.")
+            labels, centroids, pca_coords, valid_indices = [], [], [], []
+            for seg in stt_data: seg["speaker"] = "STT-Only"
 
         dia_texts = []
-        for seg in stt_data: seg["speaker"] = "Unknown"
         for vector_idx, stt_idx in enumerate(valid_indices):
-            best_label = labels[vector_idx]
-            stt_data[stt_idx]["speaker"] = f"Speaker {best_label}"
-            
-            # 시간 정보 추가 (분:초)
+            # Diarization 활성화된 경우에만 시간 정보 로그 생성 (UI 표시용)
             ts = stt_data[stt_idx]["start"]
             mins = int(ts // 60)
             secs = int(ts % 60)
             text_preview = stt_data[stt_idx]["text"][:50]
             if len(stt_data[stt_idx]["text"]) > 50: text_preview += "..."
-            
             dia_texts.append(f"[{mins:02d}:{secs:02d}] {text_preview}")
+            
+        if not diarization_enabled:
+            # 비활성화 시 요약 로그만 생성
+            dia_texts = [f"STT 완료: {len(stt_data)}개 문장"]
 
         # 저장 로직
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
@@ -337,7 +351,25 @@ class STTPipeline:
         db_dir = r"c:\ameva\AMEVA-STT-Agent\db\clusters"
         os.makedirs(db_dir, exist_ok=True)
         final_cluster_path = os.path.join(db_dir, f"{base_name}_clusters.json")
-        
+
+        # CSV 저장 로직 추가
+        import csv
+        final_csv_path = os.path.join(output_dir, f"{base_name}.csv")
+        try:
+            with open(final_csv_path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Start", "End", "Speaker", "Text"])
+                for s in stt_data:
+                    writer.writerow([
+                        f"{s['start']:.2f}",
+                        f"{s['end']:.2f}",
+                        s.get("speaker", "Unknown"),
+                        s.get("text", "")
+                    ])
+            log(f"[Pipeline] CSV 결과 생성 완료: {os.path.basename(final_csv_path)}")
+        except Exception as e:
+            log(f"[Error] CSV 저장 실패: {str(e)}")
+
         with open(final_json_path, "w", encoding="utf-8") as f:
             json.dump(stt_data, f, indent=4, ensure_ascii=False)
         with open(final_txt_path, "w", encoding="utf-8") as f:
@@ -351,4 +383,7 @@ class STTPipeline:
         with open(final_cluster_path, "w", encoding="utf-8") as f:
             json.dump(cluster_data, f)
                 
-        return final_json_path, np.array(pca_coords), labels, final_cluster_path, dia_texts
+        # 전체 텍스트 합산
+        full_text = " ".join([s.get("text", "").strip() for s in stt_data])
+
+        return final_json_path, np.array(pca_coords), labels, final_cluster_path, dia_texts, full_text

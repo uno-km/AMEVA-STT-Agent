@@ -13,8 +13,10 @@ class SettingsManager(QObject):
             "models_dir": r"C:\ameva\AI_Models",
             "stt": {
                 "model": "medium", # small, medium, turbo
+                "custom_model_path": "",
                 "language": "ko",
                 "threads": 4,
+                "diarization_enabled": True,
                 "speakers": 2,
                 "max_offset": 2.0,
                 "max_len": 20,

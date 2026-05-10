@@ -12,10 +12,11 @@ class PipelineWorker(QThread):
     chart_signal = pyqtSignal(object, object, object) # (embeddings, labels, texts)
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, input_dir, output_dir):
+    def __init__(self, input_dir, output_dir, batch_name=None):
         super().__init__()
         self.input_dir = input_dir
         self.output_dir = output_dir
+        self.batch_name = batch_name
         
         # Load batch DB info from settings
         batch_settings = settings_manager.get("batch")
@@ -55,8 +56,13 @@ class PipelineWorker(QThread):
 
     def run(self):
         pipeline = STTPipeline()
-        batch_id = datetime.now().strftime("%Y%m%d_%H%M")
-        
+        # 배치 ID 및 폴더명 확정
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if not self.batch_name:
+            batch_id = f"{timestamp}_TASK-{self.task_id_counter:04d}"
+        else:
+            batch_id = f"{self.batch_name}_{timestamp}"
+            
         self.log_signal.emit(f"🚀 배치 작업 시작 (Batch ID: {batch_id})")
         self.log_signal.emit(f"[*] 입력 폴더 스캔 중: {self.input_dir}")
         
@@ -91,6 +97,8 @@ class PipelineWorker(QThread):
             return
 
         self.log_signal.emit(f"▶️ 신규 분석 시작: {len(work_queue)}개 파일 대기 중")
+        
+        results_summary = []
 
         for rel_path, full_path in work_queue:
             self.log_signal.emit(f"\n[Processing] {rel_path} ...")
@@ -103,13 +111,22 @@ class PipelineWorker(QThread):
                 stt_config = settings_manager.get("stt")
                 
                 # Execute Pipeline
-                final_json_path, embeddings, labels, cluster_db_path, dia_texts = pipeline.execute(
+                final_json_path, embeddings, labels, cluster_db_path, dia_texts, full_text = pipeline.execute(
                     full_path, 
                     self.output_dir, 
                     logger_callback=lambda msg: self.log_signal.emit(msg),
                     system_callback=lambda msg: self.system_log_signal.emit(msg),
-                    task_id=task_id_str
+                    task_id=task_id_str,
+                    diarization_enabled=stt_config.get("diarization_enabled", True)
                 )
+                
+                # 요약 정보 수집
+                results_summary.append({
+                    "Task ID": task_id_str,
+                    "Original Filename": rel_path,
+                    "Task Name": self.batch_name if self.batch_name else batch_id,
+                    "Full Script": full_text
+                })
                 
                 duration = time.time() - start_ts
                 self.log_batch_result(rel_path, final_json_path, batch_id, duration, "SUCCESS", "", cluster_db_path, stt_config, task_id_str)
@@ -125,6 +142,19 @@ class PipelineWorker(QThread):
                 self.log_signal.emit(f"❌ 오류 발생: {err_msg}")
                 self.log_batch_result(rel_path, "", batch_id, duration, "FAIL", err_msg, "", settings_manager.get("stt"), task_id_str)
                 self._write_cluster_mapping(task_id_str, rel_path, "")
+
+        # 3. Write Summary CSV
+        if results_summary:
+            summary_file = os.path.join(self.output_dir, "full_result_set.csv")
+            try:
+                with open(summary_file, "w", encoding="utf-8-sig", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=["Task ID", "Original Filename", "Task Name", "Full Script"])
+                    writer.writeheader()
+                    for item in results_summary:
+                        writer.writerow(item)
+                self.log_signal.emit(f"📊 통합 결과 요약 생성 완료: {os.path.basename(summary_file)}")
+            except Exception as e:
+                self.log_signal.emit(f"⚠️ 요약 CSV 생성 실패: {str(e)}")
 
         self.log_signal.emit(f"\n✅ 모든 배치 작업이 종료되었습니다. (ID: {batch_id})")
 
