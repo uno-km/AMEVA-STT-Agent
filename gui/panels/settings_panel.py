@@ -201,7 +201,7 @@ class SettingsPanel(QWidget):
     def update_model_list(self):
         self.combo_model.clear()
         base_dir = r"C:\ameva\AI_Models\ggml"
-        models = ["small", "medium", "turbo", "large"]
+        models = ["tiny", "small", "medium", "turbo", "large"]
         
         for m in models:
             # GGML 파일명 패턴 확인 (양자화 버전 포함 검색)

@@ -14,6 +14,7 @@ class ModelDownloader(QThread):
         
         # Whisper.cpp GGML Q5_0 양자화 모델 URL 매핑 (효율성 극대화)
         self.url_map = {
+            "tiny": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
             "small": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
             "medium": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
             "turbo": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",

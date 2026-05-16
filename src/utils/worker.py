@@ -89,9 +89,13 @@ class PipelineWorker(QThread):
         # 2. Load DB and filter
         processed_files = self.load_processed_files()
         work_queue = []
+        current_model = settings_manager.get("stt").get("model", "medium")
+        current_task_name = self.batch_name if self.batch_name else "AUTO_BATCH"
+
         for rel_path, full_path in audio_files:
-            if rel_path in processed_files:
-                self.log_signal.emit(f"[-] Skip: {rel_path} (이미 SUCCESS 기록이 있음)")
+            # (파일명, 모델명, 테스크명) 삼위일체 체크
+            if (rel_path, current_model, current_task_name) in processed_files:
+                self.log_signal.emit(f"[-] Skip: {rel_path} (동일 테스크/모델 기록이 이미 있음)")
             else:
                 work_queue.append((rel_path, full_path))
         
@@ -174,7 +178,11 @@ class PipelineWorker(QThread):
                 reader = csv.DictReader(f)
                 for row in reader:
                     if row.get("status", "").upper() == "SUCCESS":
-                        processed.add(row.get("original_filename"))
+                        # (파일명, 모델명, 테스크명) 조합을 키로 저장
+                        fname = row.get("original_filename")
+                        model = row.get("model")
+                        tname = row.get("batch_name") # 새로 추가할 컬럼
+                        processed.add((fname, model, tname))
         except:
             pass
         return processed
@@ -183,7 +191,7 @@ class PipelineWorker(QThread):
         stt_config = stt_config or {}
         fieldnames = [
             "timestamp", "original_filename", "output_filename", 
-            "batch_id", "duration", "status", "error", "cluster_db_path",
+            "batch_id", "batch_name", "duration", "status", "error", "cluster_db_path",
             "model", "language", "threads", "speakers", "max_offset", 
             "max_len", "split_on_word", "vad_enabled", "task_id"
         ]
@@ -217,6 +225,7 @@ class PipelineWorker(QThread):
                 "original_filename": original_filename,
                 "output_filename": output_filename,
                 "batch_id": batch_id,
+                "batch_name": self.batch_name if self.batch_name else "AUTO_BATCH",
                 "duration": f"{duration:.2f}",
                 "status": status,
                 "error": error,
