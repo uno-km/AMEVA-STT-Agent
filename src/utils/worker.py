@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QThread, pyqtSignal
+import threading
 from src.core.pipeline import STTPipeline
 from src.core.settings_manager import settings_manager
 import os
@@ -6,14 +6,23 @@ import time
 import csv
 from datetime import datetime
 
-class PipelineWorker(QThread):
-    log_signal = pyqtSignal(str)
-    system_log_signal = pyqtSignal(str) # 시스템 로그 전용 신호 추가
-    chart_signal = pyqtSignal(object, object, object) # (embeddings, labels, texts)
-    finished_signal = pyqtSignal(str)
+class Signal:
+    def __init__(self, callback=None):
+        self.callback = callback
+    def emit(self, *args):
+        if self.callback:
+            if len(args) == 1:
+                self.callback(args[0])
+            else:
+                self.callback(*args)
 
-    def __init__(self, input_dir, output_dir, batch_name=None):
+class PipelineWorker(threading.Thread):
+    def __init__(self, input_dir, output_dir, batch_name=None, log_callback=None, system_log_callback=None, chart_callback=None, finished_callback=None):
         super().__init__()
+        self.log_signal = Signal(log_callback)
+        self.system_log_signal = Signal(system_log_callback)
+        self.chart_signal = Signal(chart_callback)
+        self.finished_signal = Signal(finished_callback)
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.batch_name = batch_name

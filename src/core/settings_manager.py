@@ -1,12 +1,8 @@
 import json
 import os
-from PyQt6.QtCore import QObject, pyqtSignal
-
-class SettingsManager(QObject):
-    settings_changed = pyqtSignal(dict)
-
+class SettingsManager:
     def __init__(self):
-        super().__init__()
+        self.settings_callbacks = []
         self.settings_file = "settings.json"
         
         # 기본 경로 설정
@@ -65,7 +61,11 @@ class SettingsManager(QObject):
             
         with open(self.settings_file, "w", encoding="utf-8") as f:
             json.dump(self.settings, f, indent=4, ensure_ascii=False)
-        self.settings_changed.emit(self.settings)
+        for callback in self.settings_callbacks:
+            try:
+                callback(self.settings)
+            except Exception:
+                pass
 
     def _update_nested_dict(self, base, update):
         for k, v in update.items():
@@ -80,6 +80,10 @@ class SettingsManager(QObject):
             if not isinstance(d, dict): return {}
             d = d.get(k, {})
         return d
+
+    def set(self, key, value):
+        self.settings[key] = value
+        self.save()
 
 # Create the global instance
 settings_manager = SettingsManager()

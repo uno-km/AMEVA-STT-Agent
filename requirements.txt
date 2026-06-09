@@ -1,4 +1,6 @@
-PyQt6
+streamlit
+plotly
+pandas
 matplotlib
 numpy
 scipy
@@ -6,3 +8,6 @@ scikit-learn
 pywhispercpp
 torch
 torchaudio
+vosk
+python-docx
+
