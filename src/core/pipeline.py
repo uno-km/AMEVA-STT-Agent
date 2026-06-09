@@ -354,23 +354,7 @@ class STTPipeline:
         os.makedirs(db_dir, exist_ok=True)
         final_cluster_path = os.path.join(db_dir, f"{base_name}_clusters.json")
 
-        # CSV 저장 로직 추가
-        import csv
-        final_csv_path = os.path.join(output_dir, f"{base_name}.csv")
-        try:
-            with open(final_csv_path, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Start", "End", "Speaker", "Text"])
-                for s in stt_data:
-                    writer.writerow([
-                        f"{s['start']:.2f}",
-                        f"{s['end']:.2f}",
-                        s.get("speaker", "Unknown"),
-                        s.get("text", "")
-                    ])
-            log(f"[Pipeline] CSV 결과 생성 완료: {os.path.basename(final_csv_path)}")
-        except Exception as e:
-            log(f"[Error] CSV 저장 실패: {str(e)}")
+
 
         with open(final_json_path, "w", encoding="utf-8") as f:
             json.dump(stt_data, f, indent=4, ensure_ascii=False)

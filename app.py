@@ -5,9 +5,12 @@ import pandas as pd
 import json
 import plotly.express as px
 import threading
+import tkinter as tk
+from tkinter import filedialog
 from src.core.pipeline import STTPipeline
 from src.core.settings_manager import settings_manager
 from src.utils.report_generator import create_stt_report, create_comparison_report
+from src.db.db_manager import log_batch, log_transcriptions, log_error, get_table_df
 
 st.set_page_config(page_title="AMEVA Hybrid STT Enterprise", layout="wide", page_icon="🎙️")
 
@@ -24,13 +27,6 @@ st.markdown("""
 st.title("🎙️ AMEVA STT Enterprise Dashboard")
 st.markdown("**(Professional Edition with Advanced Configuration & Reporting)**")
 
-tab_run, tab_compare, tab_explorer, tab_settings = st.tabs([
-    "▶️ 작업 실행 (Batch & Auto)", 
-    "⚖️ 모델 성능 비교", 
-    "📁 데이터 및 결과 탐색기", 
-    "⚙️ 시스템 고급 설정"
-])
-
 stt_settings = settings_manager.get("stt")
 batch_settings = settings_manager.get("batch")
 
@@ -42,77 +38,145 @@ def safe_save_chart(fig, path):
     except:
         return None
 
-# --- TAB 4: ADVANCED SETTINGS ---
-with tab_settings:
-    st.header("⚙️ 엔터프라이즈급 STT 시스템 파라미터")
-    with st.form("advanced_settings_form"):
-        st.subheader("1. 모델 구성")
-        col1, col2 = st.columns(2)
-        with col1:
-            models = ["tiny", "small", "medium", "large-v3-turbo", "large"]
-            idx = models.index(stt_settings.get("model", "medium")) if stt_settings.get("model", "medium") in models else 2
-            model_size = st.selectbox("Whisper 모델 사이즈", models, index=idx)
-            custom_model_path = st.text_input("커스텀 모델 디렉터리 경로 (입력 시 우선 적용)", stt_settings.get("custom_model_path", ""))
-        with col2:
-            langs = ["auto", "ko", "en"]
-            idx = langs.index(stt_settings.get("language", "ko")) if stt_settings.get("language", "ko") in langs else 1
-            language = st.selectbox("언어 인식 설정", langs, index=idx)
-            threads = st.number_input("사용할 CPU 스레드 수", min_value=1, max_value=32, value=int(stt_settings.get("threads", 4)))
-            
-        st.subheader("2. 화자 분리 및 오프셋(Diarization & Offset)")
-        col3, col4 = st.columns(2)
-        with col3:
-            diarization_enabled = st.toggle("화자 분리(Diarization) 활성화", value=stt_settings.get("diarization_enabled", True))
-            speakers = st.number_input("예상 화자 수 (0 = 자동)", min_value=0, max_value=20, value=int(stt_settings.get("speakers", 2)))
-        with col4:
-            max_offset = st.number_input("Max Offset (최대 허용 오차 초)", value=float(stt_settings.get("max_offset", 2.0)), step=0.1)
-            max_len = st.number_input("Max Length (청크 최대 길이)", value=int(stt_settings.get("max_len", 20)))
-            split_on_word = st.toggle("단어 단위 분할(Split on word)", value=stt_settings.get("split_on_word", True))
-            
-        st.subheader("3. VAD (음성 활동 감지) 제어")
-        col5, col6 = st.columns(2)
-        with col5:
-            vad_enabled = st.toggle("VAD 활성화", value=stt_settings.get("vad_enabled", False))
-        with col6:
-            vad_max_speech = st.number_input("VAD Max Speech Duration (s)", value=int(stt_settings.get("vad_max_speech_duration", 5)))
-            vad_min_silence = st.number_input("VAD Min Silence Duration (ms)", value=int(stt_settings.get("vad_min_silence_duration", 500)))
+# Tkinter File Dialogs
+def ask_directory():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    folder = filedialog.askdirectory(master=root)
+    root.destroy()
+    return folder
 
-        st.subheader("4. 배치 및 디렉터리 설정")
-        col7, col8 = st.columns(2)
-        with col7:
-            input_dir = st.text_input("입력 오디오 폴더 경로", batch_settings.get("input_dir", r"C:\ameva\input"))
-            output_dir = st.text_input("출력 결과 폴더 경로", batch_settings.get("output_dir", r"C:\ameva\outputs"))
-        with col8:
-            interval_min = st.number_input("예약 배치 실행 간격(분)", min_value=1, value=int(batch_settings.get("interval_min", 1)))
-            db_file = st.text_input("메인 DB 로그 경로 (CSV)", batch_settings.get("db_file", r"C:\ameva\db\stt_batch_log.csv"))
-            exception_db_file = st.text_input("에러 DB 로그 경로 (CSV)", batch_settings.get("exception_db_file", r"C:\ameva\db\stt_exception_log.csv"))
-            
-        if st.form_submit_button("모든 설정 저장 및 적용", type="primary"):
-            stt_settings.update({
-                "model": model_size, "custom_model_path": custom_model_path, "language": language, "threads": threads,
-                "diarization_enabled": diarization_enabled, "speakers": speakers, "max_offset": max_offset, "max_len": max_len,
-                "split_on_word": split_on_word, "vad_enabled": vad_enabled, "vad_max_speech_duration": vad_max_speech,
-                "vad_min_silence_duration": vad_min_silence
-            })
-            batch_settings.update({
-                "input_dir": input_dir, "output_dir": output_dir, "interval_min": interval_min,
-                "db_file": db_file, "exception_db_file": exception_db_file
-            })
-            settings_manager.set("stt", stt_settings)
-            settings_manager.set("batch", batch_settings)
-            st.success("✅ 엔터프라이즈 환경 설정이 성공적으로 저장되었습니다.")
+def ask_file():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    file_path = filedialog.askopenfilename(master=root, filetypes=[("Audio/Media Files", "*.wav *.mp3 *.m4a *.flac *.mp4 *.avi *.mkv"), ("All Files", "*.*")])
+    root.destroy()
+    return file_path
 
+# State initialization for UI fields
+if "ui_custom_model" not in st.session_state: st.session_state["ui_custom_model"] = stt_settings.get("custom_model_path", "")
+if "ui_input_dir" not in st.session_state: st.session_state["ui_input_dir"] = batch_settings.get("input_dir", r"C:\ameva\input")
+if "ui_output_dir" not in st.session_state: st.session_state["ui_output_dir"] = batch_settings.get("output_dir", r"C:\ameva\outputs")
+if "ui_manual_path" not in st.session_state: st.session_state["ui_manual_path"] = ""
+if "ui_comp_path" not in st.session_state: st.session_state["ui_comp_path"] = ""
+
+# --- SIDEBAR: ADVANCED SETTINGS ---
+st.sidebar.header("⚙️ 시스템 고급 설정")
+
+st.sidebar.subheader("1. 모델 구성")
+models = ["tiny", "small", "medium", "large-v3-turbo", "large"]
+idx = models.index(stt_settings.get("model", "medium")) if stt_settings.get("model", "medium") in models else 2
+model_size = st.sidebar.selectbox("Whisper 모델 사이즈", models, index=idx)
+
+st.sidebar.markdown("**커스텀 모델 경로**")
+col1, col2 = st.sidebar.columns([4, 1])
+with col1: custom_model_path = st.text_input("커스텀 모델 경로", st.session_state["ui_custom_model"], key="cm_in", label_visibility="collapsed")
+with col2:
+    if st.button("📁", key="btn_cm"):
+        d = ask_directory()
+        if d: 
+            st.session_state["ui_custom_model"] = d
+            st.rerun()
+
+langs = ["auto", "ko", "en"]
+lang_idx = langs.index(stt_settings.get("language", "ko")) if stt_settings.get("language", "ko") in langs else 1
+language = st.sidebar.selectbox("언어 인식 설정", langs, index=lang_idx)
+threads = st.sidebar.number_input("사용할 CPU 스레드 수", min_value=1, max_value=32, value=int(stt_settings.get("threads", 4)))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("2. 화자 분리 및 오프셋")
+diarization_enabled = st.sidebar.toggle("화자 분리 활성화", value=stt_settings.get("diarization_enabled", True))
+speakers = st.sidebar.number_input("예상 화자 수 (0=자동)", min_value=0, max_value=20, value=int(stt_settings.get("speakers", 2)))
+max_offset = st.sidebar.number_input("Max Offset", value=float(stt_settings.get("max_offset", 2.0)), step=0.1)
+max_len = st.sidebar.number_input("Max Length", value=int(stt_settings.get("max_len", 20)))
+split_on_word = st.sidebar.toggle("단어 단위 분할", value=stt_settings.get("split_on_word", True))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("3. VAD 제어")
+vad_enabled = st.sidebar.toggle("VAD 활성화", value=stt_settings.get("vad_enabled", False))
+vad_max_speech = st.sidebar.number_input("VAD Max Speech (s)", value=int(stt_settings.get("vad_max_speech_duration", 5)))
+vad_min_silence = st.sidebar.number_input("VAD Min Silence (ms)", value=int(stt_settings.get("vad_min_silence_duration", 500)))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("4. 경로 및 배치 설정")
+
+st.sidebar.markdown("**입력 오디오 폴더**")
+col3, col4 = st.sidebar.columns([4, 1])
+with col3: input_dir = st.text_input("입력 오디오 폴더", st.session_state["ui_input_dir"], label_visibility="collapsed")
+with col4:
+    if st.button("📁", key="btn_in"):
+        d = ask_directory()
+        if d: st.session_state["ui_input_dir"] = d; st.rerun()
+
+st.sidebar.markdown("**출력 결과 폴더**")
+col5, col6 = st.sidebar.columns([4, 1])
+with col5: output_dir = st.text_input("출력 결과 폴더", st.session_state["ui_output_dir"], label_visibility="collapsed")
+with col6:
+    if st.button("📁", key="btn_out"):
+        d = ask_directory()
+        if d: st.session_state["ui_output_dir"] = d; st.rerun()
+
+interval_min = st.sidebar.number_input("예약 실행 간격(분)", min_value=1, value=int(batch_settings.get("interval_min", 1)))
+
+if st.sidebar.button("설정 저장 및 적용", type="primary", use_container_width=True):
+    stt_settings.update({
+        "model": model_size, "custom_model_path": custom_model_path, "language": language, "threads": threads,
+        "diarization_enabled": diarization_enabled, "speakers": speakers, "max_offset": max_offset, "max_len": max_len,
+        "split_on_word": split_on_word, "vad_enabled": vad_enabled, "vad_max_speech_duration": vad_max_speech,
+        "vad_min_silence_duration": vad_min_silence
+    })
+    batch_settings.update({
+        "input_dir": input_dir, "output_dir": output_dir, "interval_min": interval_min
+    })
+    settings_manager.set("stt", stt_settings)
+    settings_manager.set("batch", batch_settings)
+    st.sidebar.success("설정이 저장되었습니다.")
+
+# TABS
+tab_run, tab_compare, tab_explorer, tab_db = st.tabs([
+    "▶️ 작업 실행 (Batch & Auto)", 
+    "⚖️ 모델 성능 비교", 
+    "📁 데이터 및 결과 탐색기",
+    "📊 데이터베이스 및 시스템 로그"
+])
 
 # --- TAB 1: RUN BATCH & AUTO MODE ---
 with tab_run:
     st.header("▶️ 파이프라인 제어 센터")
     col_mode1, col_mode2 = st.columns(2)
     with col_mode1:
-        st.subheader("단일 / 매뉴얼 배치 실행")
-        manual_path = st.text_input("분석할 개별 파일 또는 폴더 경로 (미입력시 기본 Input Directory 사용)", "")
+        st.subheader("단일 오디오/디렉터리 수동 실행")
+        uploaded_file = st.file_uploader("웹 업로드 (오디오 파일 끌어다 놓기)", type=["wav", "mp3", "m4a", "flac"])
+        
+        st.markdown("**또는 직접 경로 (파일/폴더)**")
+        col_m1, col_m2, col_m3 = st.columns([6, 1, 1])
+        with col_m1: manual_path = st.text_input("직접 경로", st.session_state["ui_manual_path"], key="m_in", label_visibility="collapsed")
+        with col_m2:
+            if st.button("📁", key="m_btn_d"):
+                d = ask_directory()
+                if d: st.session_state["ui_manual_path"] = d; st.rerun()
+        with col_m3:
+            if st.button("📄", key="m_btn_f"):
+                f = ask_file()
+                if f: st.session_state["ui_manual_path"] = f; st.rerun()
+                
         if st.button("수동 작업 즉시 시작 🚀", use_container_width=True, type="primary"):
+            target_p = ""
+            if uploaded_file is not None:
+                os.makedirs(batch_settings.get("input_dir", r"C:\ameva\input"), exist_ok=True)
+                target_p = os.path.join(batch_settings.get("input_dir", r"C:\ameva\input"), uploaded_file.name)
+                with open(target_p, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+            elif manual_path.strip():
+                target_p = manual_path.strip()
+            else:
+                target_p = batch_settings.get("input_dir", "")
+                
             st.session_state["run_mode"] = "manual"
-            st.session_state["target_path"] = manual_path if manual_path else batch_settings.get("input_dir", "")
+            st.session_state["target_path"] = target_p
+            
     with col_mode2:
         st.subheader("자동 감시 및 스케줄링 (Auto Mode)")
         st.info(f"현재 설정된 간격: {batch_settings.get('interval_min', 1)}분")
@@ -137,6 +201,8 @@ with tab_run:
             log_text.append(f"[SYSTEM] {msg}")
             display_text = "\n".join(log_text[-50:])
             log_container.code(display_text, language="text")
+            if "error" in msg.lower() or "fail" in msg.lower() or "❌" in msg:
+                log_error("Pipeline System", msg)
 
         pipeline = STTPipeline()
         out_dir = batch_settings.get("output_dir", r"C:\ameva\outputs")
@@ -148,36 +214,52 @@ with tab_run:
                 st.error("유효하지 않은 경로입니다.")
             else:
                 with st.spinner("엔터프라이즈 파이프라인 가동 중..."):
-                    start_t = time.time()
                     try:
-                        final_json, pca_coords, labels, cluster_path, dia_texts, full_text = pipeline.execute(
-                            audio_path=target, output_dir=out_dir, logger_callback=log_callback,
-                            system_callback=sys_callback, task_id="MANUAL_BATCH",
-                            diarization_enabled=stt_settings.get("diarization_enabled", True), batch_id="STT_ENT_BATCH"
-                        )
-                        proc_time = time.time() - start_t
-                        st.success("✅ 수동 작업이 완료되었습니다.")
+                        targets = []
+                        if os.path.isdir(target):
+                            for f in os.listdir(target):
+                                if f.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.mp4', '.mkv', '.avi')):
+                                    targets.append(os.path.join(target, f))
+                        else:
+                            targets = [target]
                         
-                        # Load chunks for report
-                        chunks_data = []
-                        if os.path.exists(final_json):
-                            with open(final_json, 'r', encoding='utf-8') as f:
-                                chunks_data = json.load(f)
-                                
-                        st.session_state["last_json"] = final_json
-                        st.session_state["last_cluster"] = cluster_path
-                        st.session_state["last_stats"] = {
-                            "processing_time_sec": proc_time,
-                            "model": stt_settings.get("model", ""),
-                            "language": stt_settings.get("language", "auto"),
-                            "diarization_enabled": stt_settings.get("diarization_enabled", True)
-                        }
-                        st.session_state["last_text"] = full_text
-                        st.session_state["last_audio"] = target
-                        st.session_state["last_chunks"] = chunks_data
+                        log_callback(f"[Batch] 총 {len(targets)}개의 파일을 처리합니다.")
                         
+                        for i, t in enumerate(targets):
+                            log_callback(f"\n[Batch] {i+1}/{len(targets)} 처리 시작: {os.path.basename(t)}")
+                            start_t = time.time()
+                            final_json, pca_coords, labels, cluster_path, dia_texts, full_text = pipeline.execute(
+                                audio_path=t, output_dir=out_dir, logger_callback=log_callback,
+                                system_callback=sys_callback, task_id="MANUAL_BATCH",
+                                diarization_enabled=stt_settings.get("diarization_enabled", True), batch_id="STT_ENT_BATCH"
+                            )
+                            proc_time = time.time() - start_t
+                            
+                            chunks_data = []
+                            if final_json and os.path.exists(final_json):
+                                with open(final_json, 'r', encoding='utf-8') as f:
+                                    chunks_data = json.load(f)
+                                    
+                            # DB Log
+                            batch_id = log_batch("MANUAL_BATCH", t, stt_settings.get("model", ""), stt_settings.get("language", "auto"), proc_time, "SUCCESS")
+                            log_transcriptions(batch_id, chunks_data)
+                                    
+                            st.session_state["last_json"] = final_json
+                            st.session_state["last_cluster"] = cluster_path
+                            st.session_state["last_stats"] = {
+                                "processing_time_sec": proc_time,
+                                "model": stt_settings.get("model", ""),
+                                "language": stt_settings.get("language", "auto"),
+                                "diarization_enabled": stt_settings.get("diarization_enabled", True)
+                            }
+                            st.session_state["last_text"] = full_text
+                            st.session_state["last_audio"] = t
+                            st.session_state["last_chunks"] = chunks_data
+                            
+                        st.success("✅ 수동 작업이 모두 완료되었습니다.")
                     except Exception as e:
                         st.error(f"❌ 작업 오류: {e}")
+                        log_error("Manual Batch Process", str(e))
                 st.session_state["run_mode"] = "none"
         
         elif st.session_state["run_mode"] == "auto":
@@ -188,6 +270,31 @@ with tab_run:
                 for _ in range(5):
                     if st.session_state.get("run_mode") != "auto": break
                     log_callback(f"[*] 오디오 폴더 스캔 중: {input_d}")
+                    if os.path.exists(input_d):
+                        for f in os.listdir(input_d):
+                            if f.lower().endswith(('.wav', '.mp3', '.m4a', '.flac')):
+                                p = os.path.join(input_d, f)
+                                log_callback(f"[Auto] 새로운 파일 감지: {f}")
+                                try:
+                                    start_t = time.time()
+                                    final_json, pca_coords, labels, cluster_path, dia_texts, full_text = pipeline.execute(
+                                        audio_path=p, output_dir=out_dir, logger_callback=log_callback,
+                                        system_callback=sys_callback, task_id="AUTO",
+                                        diarization_enabled=stt_settings.get("diarization_enabled", True), batch_id="AUTO_BATCH"
+                                    )
+                                    proc_time = time.time() - start_t
+                                    
+                                    chunks_data = []
+                                    if final_json and os.path.exists(final_json):
+                                        with open(final_json, 'r', encoding='utf-8') as jsf:
+                                            chunks_data = json.load(jsf)
+                                    
+                                    batch_id = log_batch("AUTO", p, stt_settings.get("model", ""), stt_settings.get("language", "auto"), proc_time, "SUCCESS")
+                                    log_transcriptions(batch_id, chunks_data)
+                                    
+                                    os.rename(p, p + ".done")
+                                except Exception as auto_e:
+                                    log_error("Auto Loop Process", str(auto_e))
                     time.sleep(interval)
                     log_callback("[*] 대기 시간 종료, 다음 스캔을 시작합니다.")
 
@@ -195,16 +302,40 @@ with tab_run:
 # --- TAB 2: MODEL COMPARISON ---
 with tab_compare:
     st.header("⚖️ 다중 모델 성능 비교")
-    st.markdown("단일 오디오 파일을 대상으로 여러 모델을 순차적으로 실행하여 성능과 결과물을 정밀 비교합니다.")
+    st.markdown("단일 오디오/디렉터리를 대상으로 여러 모델을 순차적으로 실행하고 성능을 비교합니다.")
     
-    comp_audio_path = st.text_input("비교할 대상 오디오 파일 경로", "")
+    st.markdown("**비교할 대상 (파일 또는 폴더)**")
+    col_c1, col_c2, col_c3 = st.columns([6, 1, 1])
+    with col_c1: comp_audio_path = st.text_input("비교할 대상", st.session_state["ui_comp_path"], key="c_in", label_visibility="collapsed")
+    with col_c2:
+        if st.button("📁", key="c_btn_d"):
+            d = ask_directory()
+            if d: st.session_state["ui_comp_path"] = d; st.rerun()
+    with col_c3:
+        if st.button("📄", key="c_btn_f"):
+            f = ask_file()
+            if f: st.session_state["ui_comp_path"] = f; st.rerun()
     
     builtin_models = st.multiselect("비교할 내장 모델 선택", ["tiny", "small", "medium", "large-v3-turbo", "large"], default=["small", "medium"])
-    custom_models_str = st.text_input("커스텀 모델 경로들 (쉼표로 구분하여 여러 개 입력 가능)", "")
+    
+    st.markdown("**커스텀 모델 경로들 (쉼표로 구분하여 여러 개 입력 가능)**")
+    col_m1, col_m2 = st.columns([6, 1])
+    with col_m1: custom_models_str = st.text_input("커스텀 모델 경로들", "", label_visibility="collapsed")
+    with col_m2:
+        if st.button("📁추가", key="c_btn_cust"):
+            d = ask_directory()
+            if d: 
+                # Append to existing
+                cur = custom_models_str.strip()
+                new_val = f"{cur}, {d}" if cur else d
+                st.session_state["custom_models_str"] = new_val
+                st.success(f"경로를 복사하여 텍스트 상자에 붙여넣으세요:\n{d}")
     
     if st.button("비교 시작 🏁", type="primary"):
-        if not comp_audio_path or not os.path.exists(comp_audio_path):
-            st.error("유효한 오디오 파일을 지정해주세요.")
+        target_p = comp_audio_path.strip()
+            
+        if not target_p or not os.path.exists(target_p):
+            st.error("유효한 오디오 파일 또는 폴더 경로를 지정해주세요.")
         else:
             models_to_test = builtin_models.copy()
             if custom_models_str.strip():
@@ -213,101 +344,117 @@ with tab_compare:
             if not models_to_test:
                 st.warning("비교할 모델을 최소 하나 이상 선택하세요.")
             else:
+                targets = []
+                if os.path.isdir(target_p):
+                    for f in os.listdir(target_p):
+                        if f.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.mp4', '.mkv', '.avi')):
+                            targets.append(os.path.join(target_p, f))
+                else:
+                    targets = [target_p]
+                    
                 st.session_state["comp_models"] = models_to_test
+                st.session_state["comp_targets"] = targets
                 st.session_state["comp_results"] = {}
-                st.session_state["comp_audio"] = comp_audio_path
-                st.session_state["comp_status"] = {m: "pending" for m in models_to_test} # "pending", "running", "done", "error"
+                st.session_state["comp_status"] = {m: "pending" for m in models_to_test}
 
-    # Status & Execution Area
     if "comp_models" in st.session_state and st.session_state["comp_models"]:
         st.markdown("### 🚦 비교 작업 상태 현황")
         models_to_test = st.session_state["comp_models"]
+        targets = st.session_state["comp_targets"]
+        
+        st.info(f"총 {len(targets)}개의 미디어 파일에 대해 {len(models_to_test)}개 모델을 테스트합니다.")
         
         status_cols = st.columns(len(models_to_test))
         for i, m in enumerate(models_to_test):
             status = st.session_state["comp_status"].get(m, "pending")
-            icon = "🕒 대기중" if status == "pending" else "⏳ 진행중 (Spinner)" if status == "running" else "✅ 완료" if status == "done" else "❌ 에러"
-            status_cols[i].info(f"**{m}**\n\n{icon}")
+            icon = "🕒 대기중" if status == "pending" else "⏳ 진행중" if status == "running" else "✅ 완료" if status == "done" else "❌ 에러"
+            status_cols[i].info(f"**{os.path.basename(m) if os.path.isabs(m) else m}**\n\n{icon}")
             
-        # 순차 실행 로직
         pipeline = STTPipeline()
         out_dir = batch_settings.get("output_dir", r"C:\ameva\outputs")
         
-        # Check if we need to run any pending model
         for idx, m in enumerate(models_to_test):
             if st.session_state["comp_status"].get(m) == "pending":
                 st.session_state["comp_status"][m] = "running"
-                st.rerun() # Refresh UI to show spinner
+                st.rerun()
                 
             if st.session_state["comp_status"].get(m) == "running":
                 with st.spinner(f"[{m}] 모델 STT 분석 중... (이후 모델들은 순차 대기)"):
-                    # 임시 설정 덮어쓰기 (메모리에서만)
                     orig_model = stt_settings.get("model")
                     orig_custom = stt_settings.get("custom_model_path")
-                    if os.path.isabs(m): # 커스텀 경로인 경우
+                    if os.path.isabs(m):
                         settings_manager.set("stt", {**stt_settings, "model": "medium", "custom_model_path": m})
                     else:
                         settings_manager.set("stt", {**stt_settings, "model": m, "custom_model_path": ""})
                     
-                    start_t = time.time()
                     try:
-                        final_json, pca_coords, labels, cluster_path, dia_texts, full_text = pipeline.execute(
-                            audio_path=st.session_state["comp_audio"], output_dir=out_dir,
-                            logger_callback=lambda x: None, system_callback=lambda x: None,
-                            task_id=f"COMP_{m}", diarization_enabled=stt_settings.get("diarization_enabled", True), batch_id="COMP_BATCH"
-                        )
-                        proc_time = time.time() - start_t
-                        
-                        chunks_data = []
-                        if os.path.exists(final_json):
-                            with open(final_json, 'r', encoding='utf-8') as f:
-                                chunks_data = json.load(f)
-                                
-                        # Save chart
+                        total_time = 0
+                        all_chunks = []
+                        all_text = ""
                         chart_p = None
-                        if cluster_path and os.path.exists(cluster_path):
-                            with open(cluster_path, "r", encoding="utf-8") as f:
-                                c_data = json.load(f)
-                            if "embeddings" in c_data:
-                                df_c = pd.DataFrame({
-                                    "PCA1": [c[0] for c in c_data.get("embeddings", [])],
-                                    "PCA2": [c[1] for c in c_data.get("embeddings", [])],
-                                    "Speaker": [str(lbl) for lbl in c_data.get("labels", [])]
-                                })
-                                fig = px.scatter(df_c, x="PCA1", y="PCA2", color="Speaker", title=f"{m} Clustering")
-                                chart_p = safe_save_chart(fig, os.path.join(out_dir, f"comp_chart_{m}.png"))
+                        
+                        for t in targets:
+                            start_t = time.time()
+                            final_json, pca_coords, labels, cluster_path, dia_texts, full_text = pipeline.execute(
+                                audio_path=t, output_dir=out_dir,
+                                logger_callback=lambda x: None, system_callback=lambda x: None,
+                                task_id=f"COMP_{os.path.basename(m) if os.path.isabs(m) else m}", 
+                                diarization_enabled=stt_settings.get("diarization_enabled", True), batch_id="COMP_BATCH"
+                            )
+                            proc_time = time.time() - start_t
+                            total_time += proc_time
+                            all_text += full_text + "\n"
+                            
+                            file_chunks = []
+                            if final_json and os.path.exists(final_json):
+                                with open(final_json, 'r', encoding='utf-8') as f:
+                                    file_chunks = json.load(f)
+                                    all_chunks.extend(file_chunks)
+                                    
+                            batch_id = log_batch("COMPARE_MODE", t, os.path.basename(m) if os.path.isabs(m) else m, stt_settings.get("language", "auto"), proc_time, "SUCCESS")
+                            log_transcriptions(batch_id, file_chunks)
+                                    
+                            if not chart_p and cluster_path and os.path.exists(cluster_path):
+                                with open(cluster_path, "r", encoding="utf-8") as f:
+                                    c_data = json.load(f)
+                                if "embeddings" in c_data:
+                                    df_c = pd.DataFrame({
+                                        "PCA1": [c[0] for c in c_data.get("embeddings", [])],
+                                        "PCA2": [c[1] for c in c_data.get("embeddings", [])],
+                                        "Speaker": [str(lbl) for lbl in c_data.get("labels", [])]
+                                    })
+                                    fig = px.scatter(df_c, x="PCA1", y="PCA2", color="Speaker", title=f"Sample Clustering")
+                                    chart_p = safe_save_chart(fig, os.path.join(out_dir, f"comp_chart_sample.png"))
                         
                         st.session_state["comp_results"][m] = {
                             "stats": {
-                                "processing_time_sec": proc_time, "model": m, 
+                                "processing_time_sec": total_time, "model": os.path.basename(m) if os.path.isabs(m) else m, 
                                 "language": stt_settings.get("language", "auto"),
                                 "diarization_enabled": stt_settings.get("diarization_enabled", True)
                             },
-                            "chunks_data": chunks_data,
+                            "chunks_data": all_chunks,
                             "chart_image_path": chart_p,
-                            "full_text": full_text
+                            "full_text": all_text
                         }
                         st.session_state["comp_status"][m] = "done"
                     except Exception as e:
                         st.session_state["comp_status"][m] = "error"
                         st.error(f"[{m}] 모델 실행 실패: {e}")
+                        log_error(f"Compare Batch - {m}", str(e))
                     
-                    # 원래 설정 복원
                     settings_manager.set("stt", {**stt_settings, "model": orig_model, "custom_model_path": orig_custom})
                 
-                st.rerun() # Refresh UI to run next pending
+                st.rerun()
                 
-        # 모든 작업이 완료된 후 결과 렌더링
         if all(s in ["done", "error"] for s in st.session_state["comp_status"].values()):
             st.success("🎉 모든 모델의 비교 분석이 완료되었습니다!")
             
-            # 결과 비교표 출력
             res_list = []
             for m, data in st.session_state["comp_results"].items():
                 res_list.append({
-                    "모델 (Model)": m,
-                    "소요 시간 (초)": round(data["stats"]["processing_time_sec"], 2),
-                    "처리된 청크 수": len(data["chunks_data"]),
+                    "모델 (Model)": os.path.basename(m) if os.path.isabs(m) else m,
+                    "총 소요 시간 (초)": round(data["stats"]["processing_time_sec"], 2),
+                    "처리된 총 청크 수": len(data["chunks_data"]),
                     "결과 텍스트 길이": len(data["full_text"])
                 })
             
@@ -317,7 +464,7 @@ with tab_compare:
                 
                 if st.button("📑 종합 비교 리포트(Word) 생성 및 다운로드", type="primary"):
                     with st.spinner("비교 리포트를 생성하고 있습니다..."):
-                        audio_p = st.session_state["comp_audio"]
+                        audio_p = st.session_state["comp_targets"][0] if st.session_state["comp_targets"] else "Multiple_Files"
                         r_path = create_comparison_report(audio_p, out_dir, st.session_state["comp_results"], task_id="Comparison")
                         with open(r_path, "rb") as f:
                             st.download_button(
@@ -396,3 +543,38 @@ with tab_explorer:
                 st.write("미리보기를 지원하지 않는 형식입니다.")
         else:
             st.write("왼쪽 트리에서 파싱된 결과를 선택하면 표, 차트, 리포트 생성 기능이 나타납니다.")
+
+
+# --- TAB 4: DATABASE & LOG VIEWER ---
+with tab_db:
+    st.header("📊 데이터베이스 및 시스템 로그 뷰어")
+    st.markdown("SQLite 데이터베이스(`db/ameva_stt.db`)에 누적된 작업 내역과 시스템 에러 로그를 실시간으로 조회합니다.")
+
+    if st.button("🔄 새로고침", type="primary"):
+        st.rerun()
+
+    db_tab1, db_tab2, db_tab3 = st.tabs(["작업 히스토리 (Batch Logs)", "청크 전사 데이터 (Transcriptions)", "시스템 예외 로그 (Error Logs)"])
+    
+    with db_tab1:
+        st.subheader("모든 작업 이력")
+        df_batch = get_table_df("batch_logs")
+        if not df_batch.empty:
+            st.dataframe(df_batch, use_container_width=True)
+        else:
+            st.info("기록된 작업이 없습니다.")
+
+    with db_tab2:
+        st.subheader("상세 전사 데이터 조회")
+        df_trans = get_table_df("transcriptions")
+        if not df_trans.empty:
+            st.dataframe(df_trans, use_container_width=True)
+        else:
+            st.info("기록된 전사 데이터가 없습니다.")
+
+    with db_tab3:
+        st.subheader("예외 발생 추적")
+        df_err = get_table_df("error_logs")
+        if not df_err.empty:
+            st.dataframe(df_err, use_container_width=True)
+        else:
+            st.success("발생한 에러가 없습니다!")
