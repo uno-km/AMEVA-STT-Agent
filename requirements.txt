@@ -10,4 +10,4 @@ torch
 torchaudio
 vosk
 python-docx
-
+yt-dlp

@@ -11,7 +11,7 @@ class SettingsManager:
         
         self.default_settings = {
             "theme": "dark",
-            "models_dir": r"C:\ameva\AI_Models",
+            "models_dir": r"C:\ameva\models\stt",
             "stt": {
                 "model": "medium", # small, medium, turbo
                 "custom_model_path": "",

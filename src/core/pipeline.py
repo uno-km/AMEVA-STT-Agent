@@ -75,7 +75,8 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
             model_path = model_size
             model_name = os.path.basename(model_path)
         else:
-            model_dir = r"C:\ameva\AI_Models\ggml"
+            from src.core.settings_manager import settings_manager
+            model_dir = settings_manager.get("models_dir", r"C:\ameva\models\stt")
             os.makedirs(model_dir, exist_ok=True)
             
             base_filename = f"ggml-{model_size}"
@@ -294,8 +295,8 @@ class STTPipeline:
         p_stt.join()
         
         if not stt_data:
-            log("[Error] STT 결과가 없습니다.")
-            return None, [], [], None, []
+            log("[Error] STT 결과가 없습니다. (모델 로드 실패 또는 오디오 에러)")
+            return None, [], [], None, [], ""
 
         if diarization_enabled:
             log(f"[Pipeline] STT 완료. {len(stt_data)}개 문장 기반 Forced Diarization 시작...")
