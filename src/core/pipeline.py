@@ -95,6 +95,11 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
 
         if not model_path:
             output_queue.put(("system", f"⚠️ 유효한 모델 파일 없음. 신규 다운로드 시도: {model_name}"))
+            from pywhispercpp.utils import download_model
+            try:
+                download_model(model_name, download_dir=model_dir)
+            except Exception as e:
+                output_queue.put(("system", f"❌ 다운로드 실패: {e}"))
             model = Model(model_name, models_dir=model_dir, n_threads=threads)
         else:
             output_queue.put(("system", f"⚙️ 엔진 초기화: {os.path.basename(model_path)} 로드 중..."))

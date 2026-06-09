@@ -1,21 +1,70 @@
+import os
 import time
+import json
+import wave
+import traceback
+from vosk import Model as VoskModel, SpkModel, KaldiRecognizer
 
 class VoskEngineCPU:
-    def __init__(self):
-        pass
+    def __init__(self, model_path=r"C:\ameva\AI_Models\vosk\ko-model", spk_model_path=r"C:\ameva\AI_Models\vosk\spk-model"):
+        self.model_path = model_path
+        self.spk_model_path = spk_model_path
+
+    def extract_forced_embeddings(self, audio_path, stt_segments, output_queue):
+        output_queue.put(("log", f"[Diarization Worker] Forced Diarization 가동 중 (총 {len(stt_segments)}개 문장)..."))
+        start_time = time.time()
         
-    def extract_speaker_embeddings(self, audio_path):
-        """
-        Mock for Vosk speaker embedding extraction on CPU.
-        Returns mock timestamps and multi-dimensional vectors representing voice characteristics.
-        """
-        print(f"[VoskEngine] Starting vector extraction for {audio_path}")
-        
-        # Simulate processing time
-        time.sleep(2)
-        
-        # Mock embeddings (timestamp, vector)
-        return [
-            {"start": 0.0, "end": 2.5, "vector": [0.12, 0.45, -0.34, 0.88]}, # Speaker 0
-            {"start": 3.0, "end": 5.0, "vector": [-0.85, 0.22, 0.11, -0.45]}  # Speaker 1
-        ]
+        if not os.path.exists(self.model_path) or not os.path.exists(self.spk_model_path):
+            output_queue.put(("log", f"❌ 치명적 오류: Vosk 화자 모델 폴더가 삭제되었습니다!"))
+            output_queue.put(("system", f"⚠️ Vosk 모델 누락!"))
+            output_queue.put(("dia_result", ([], [])))
+            return
+
+        try:
+            model = VoskModel(self.model_path)
+            spk_model = SpkModel(self.spk_model_path)
+            
+            wf = wave.open(audio_path, "rb")
+            framerate = wf.getframerate()
+            
+            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getcomptype() != "NONE":
+                output_queue.put(("system", "❌ 오디오 포맷 오류 (16kHz Mono PCM WAV 필요)"))
+                output_queue.put(("dia_result", ([], [])))
+                return
+
+            vectors = []
+            valid_indices = []
+            
+            for i, seg in enumerate(stt_segments):
+                start_frame = int(seg['start'] * framerate)
+                end_frame = int(seg['end'] * framerate)
+                num_frames = end_frame - start_frame
+                
+                if num_frames <= 0: continue
+                    
+                wf.setpos(start_frame)
+                data = wf.readframes(num_frames)
+                
+                rec = KaldiRecognizer(model, framerate)
+                rec.SetWords(True)
+                rec.SetSpkModel(spk_model)
+                
+                rec.AcceptWaveform(data)
+                res = json.loads(rec.FinalResult())
+                
+                if 'spk' in res:
+                    vectors.append(res['spk'])
+                    valid_indices.append(i)
+                    if len(vectors) % 10 == 0:
+                        output_queue.put(("log", f"[Diarization] 현재 {len(vectors)}개의 화자 지문 추출 완료..."))
+
+            elapsed = time.time() - start_time
+            output_queue.put(("log", f"[Diarization Worker] 완료 ({elapsed:.1f}초) - {len(vectors)}개 화자 지문 추출 성공!"))
+            output_queue.put(("dia_result", (vectors, valid_indices)))
+        except Exception as e:
+            output_queue.put(("system", f"❌ Diarization Error:\n{traceback.format_exc()}"))
+            output_queue.put(("dia_result", ([], [])))
+
+def run_vosk_process(audio_path, stt_segments, output_queue):
+    engine = VoskEngineCPU()
+    engine.extract_forced_embeddings(audio_path, stt_segments, output_queue)
