@@ -5,8 +5,6 @@ import pandas as pd
 import json
 import plotly.express as px
 import threading
-import tkinter as tk
-from tkinter import filedialog
 from src.core.pipeline import STTPipeline
 from src.core.settings_manager import settings_manager
 from src.utils.report_generator import create_stt_report, create_comparison_report
@@ -38,29 +36,84 @@ def safe_save_chart(fig, path):
     except:
         return None
 
-# Tkinter File Dialogs
-def ask_directory():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    folder = filedialog.askdirectory(master=root)
-    root.destroy()
-    return folder
-
-def ask_file():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    file_path = filedialog.askopenfilename(master=root, filetypes=[("Audio/Media Files", "*.wav *.mp3 *.m4a *.flac *.mp4 *.avi *.mkv"), ("All Files", "*.*")])
-    root.destroy()
-    return file_path
-
 # State initialization for UI fields
 if "ui_custom_model" not in st.session_state: st.session_state["ui_custom_model"] = stt_settings.get("custom_model_path", "")
 if "ui_input_dir" not in st.session_state: st.session_state["ui_input_dir"] = batch_settings.get("input_dir", r"C:\ameva\input")
 if "ui_output_dir" not in st.session_state: st.session_state["ui_output_dir"] = batch_settings.get("output_dir", r"C:\ameva\outputs")
 if "ui_manual_path" not in st.session_state: st.session_state["ui_manual_path"] = ""
 if "ui_comp_path" not in st.session_state: st.session_state["ui_comp_path"] = ""
+
+# Inline Web-based File Browser Component
+def inline_file_browser(key_prefix, target_state_key, mode="dir"):
+    current_path_key = f"{key_prefix}_current_path"
+    if current_path_key not in st.session_state or not st.session_state[current_path_key]:
+        st.session_state[current_path_key] = r"C:\ameva" if os.path.exists(r"C:\ameva") else os.path.expanduser("~")
+        
+    curr_path = st.session_state[current_path_key]
+    if not os.path.exists(curr_path):
+        curr_path = os.path.expanduser("~")
+        st.session_state[current_path_key] = curr_path
+
+    # Navigation bar
+    col_nav1, col_nav2 = st.columns([5, 1])
+    with col_nav1:
+        st.caption(f"📁 탐색 경로: `{curr_path}`")
+    with col_nav2:
+        if st.button("⬆️ 상위", key=f"{key_prefix}_parent", use_container_width=True):
+            st.session_state[current_path_key] = os.path.dirname(curr_path)
+            st.rerun()
+
+    # List files and directories
+    try:
+        items = os.listdir(curr_path)
+    except Exception as e:
+        st.error(f"경로를 읽을 수 없습니다: {e}")
+        items = []
+
+    sub_dirs = []
+    files = []
+    for item in items:
+        full_p = os.path.join(curr_path, item)
+        if os.path.isdir(full_p):
+            sub_dirs.append(item)
+        else:
+            if item.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.mp4', '.json', '.db', '.csv')):
+                files.append(item)
+
+    # Render Folders
+    st.markdown("**하위 폴더 목록 (클릭하여 이동):**")
+    if sub_dirs:
+        cols = st.columns(3)
+        for i, sd in enumerate(sorted(sub_dirs)):
+            with cols[i % 3]:
+                if st.button(f"📂 {sd}", key=f"{key_prefix}_dir_{sd}", use_container_width=True):
+                    st.session_state[current_path_key] = os.path.join(curr_path, sd)
+                    st.rerun()
+    else:
+        st.caption("하위 폴더가 없습니다.")
+
+    # Render Files (only if file selection mode)
+    if mode == "file":
+        st.markdown("**지원하는 파일 목록 (클릭하여 선택):**")
+        if files:
+            cols = st.columns(2)
+            for i, f in enumerate(sorted(files)):
+                with cols[i % 2]:
+                    if st.button(f"📄 {f}", key=f"{key_prefix}_file_{f}", use_container_width=True):
+                        selected_file = os.path.join(curr_path, f)
+                        st.session_state[target_state_key] = selected_file
+                        st.success(f"선택됨: {selected_file}")
+                        st.rerun()
+        else:
+            st.caption("선택 가능한 파일이 없습니다.")
+
+    # Select Button
+    st.markdown("---")
+    if mode == "dir":
+        if st.button("📍 현재 탐색중인 폴더로 최종 선택", key=f"{key_prefix}_select_curr", type="primary", use_container_width=True):
+            st.session_state[target_state_key] = curr_path
+            st.success(f"적용 완료: {curr_path}")
+            st.rerun()
 
 # --- SIDEBAR: ADVANCED SETTINGS ---
 st.sidebar.header("⚙️ 시스템 고급 설정")
@@ -71,14 +124,9 @@ idx = models.index(stt_settings.get("model", "medium")) if stt_settings.get("mod
 model_size = st.sidebar.selectbox("Whisper 모델 사이즈", models, index=idx)
 
 st.sidebar.markdown("**커스텀 모델 경로**")
-col1, col2 = st.sidebar.columns([4, 1])
-with col1: custom_model_path = st.text_input("커스텀 모델 경로", st.session_state["ui_custom_model"], key="cm_in", label_visibility="collapsed")
-with col2:
-    if st.button("📁", key="btn_cm"):
-        d = ask_directory()
-        if d: 
-            st.session_state["ui_custom_model"] = d
-            st.rerun()
+custom_model_path = st.text_input("커스텀 모델 경로", st.session_state["ui_custom_model"], key="cm_in")
+with st.sidebar.expander("📁 커스텀 모델 폴더 찾기"):
+    inline_file_browser("sb_cm", "ui_custom_model", mode="dir")
 
 langs = ["auto", "ko", "en"]
 lang_idx = langs.index(stt_settings.get("language", "ko")) if stt_settings.get("language", "ko") in langs else 1
@@ -103,20 +151,14 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("4. 경로 및 배치 설정")
 
 st.sidebar.markdown("**입력 오디오 폴더**")
-col3, col4 = st.sidebar.columns([4, 1])
-with col3: input_dir = st.text_input("입력 오디오 폴더", st.session_state["ui_input_dir"], label_visibility="collapsed")
-with col4:
-    if st.button("📁", key="btn_in"):
-        d = ask_directory()
-        if d: st.session_state["ui_input_dir"] = d; st.rerun()
+input_dir = st.text_input("입력 오디오 폴더", st.session_state["ui_input_dir"])
+with st.sidebar.expander("📁 입력 폴더 찾기"):
+    inline_file_browser("sb_in", "ui_input_dir", mode="dir")
 
 st.sidebar.markdown("**출력 결과 폴더**")
-col5, col6 = st.sidebar.columns([4, 1])
-with col5: output_dir = st.text_input("출력 결과 폴더", st.session_state["ui_output_dir"], label_visibility="collapsed")
-with col6:
-    if st.button("📁", key="btn_out"):
-        d = ask_directory()
-        if d: st.session_state["ui_output_dir"] = d; st.rerun()
+output_dir = st.text_input("출력 결과 폴더", st.session_state["ui_output_dir"])
+with st.sidebar.expander("📁 출력 폴더 찾기"):
+    inline_file_browser("sb_out", "ui_output_dir", mode="dir")
 
 interval_min = st.sidebar.number_input("예약 실행 간격(분)", min_value=1, value=int(batch_settings.get("interval_min", 1)))
 
@@ -151,16 +193,13 @@ with tab_run:
         uploaded_file = st.file_uploader("웹 업로드 (오디오 파일 끌어다 놓기)", type=["wav", "mp3", "m4a", "flac"])
         
         st.markdown("**또는 직접 경로 (파일/폴더)**")
-        col_m1, col_m2, col_m3 = st.columns([6, 1, 1])
-        with col_m1: manual_path = st.text_input("직접 경로", st.session_state["ui_manual_path"], key="m_in", label_visibility="collapsed")
-        with col_m2:
-            if st.button("📁", key="m_btn_d"):
-                d = ask_directory()
-                if d: st.session_state["ui_manual_path"] = d; st.rerun()
-        with col_m3:
-            if st.button("📄", key="m_btn_f"):
-                f = ask_file()
-                if f: st.session_state["ui_manual_path"] = f; st.rerun()
+        manual_path = st.text_input("직접 경로", st.session_state["ui_manual_path"], key="m_in")
+        with st.expander("📁 로컬 폴더/파일 찾아보기"):
+            tab_m_dir, tab_m_file = st.tabs(["폴더 선택", "파일 선택"])
+            with tab_m_dir:
+                inline_file_browser("run_dir", "ui_manual_path", mode="dir")
+            with tab_m_file:
+                inline_file_browser("run_file", "ui_manual_path", mode="file")
                 
         if st.button("수동 작업 즉시 시작 🚀", use_container_width=True, type="primary"):
             target_p = ""
@@ -305,31 +344,21 @@ with tab_compare:
     st.markdown("단일 오디오/디렉터리를 대상으로 여러 모델을 순차적으로 실행하고 성능을 비교합니다.")
     
     st.markdown("**비교할 대상 (파일 또는 폴더)**")
-    col_c1, col_c2, col_c3 = st.columns([6, 1, 1])
-    with col_c1: comp_audio_path = st.text_input("비교할 대상", st.session_state["ui_comp_path"], key="c_in", label_visibility="collapsed")
-    with col_c2:
-        if st.button("📁", key="c_btn_d"):
-            d = ask_directory()
-            if d: st.session_state["ui_comp_path"] = d; st.rerun()
-    with col_c3:
-        if st.button("📄", key="c_btn_f"):
-            f = ask_file()
-            if f: st.session_state["ui_comp_path"] = f; st.rerun()
+    comp_audio_path = st.text_input("비교할 대상", st.session_state["ui_comp_path"], key="c_in")
+    with st.expander("📁 로컬 폴더/파일 찾아보기"):
+        tab_c_dir, tab_c_file = st.tabs(["폴더 선택", "파일 선택"])
+        with tab_c_dir:
+            inline_file_browser("comp_dir", "ui_comp_path", mode="dir")
+        with tab_c_file:
+            inline_file_browser("comp_file", "ui_comp_path", mode="file")
     
     builtin_models = st.multiselect("비교할 내장 모델 선택", ["tiny", "small", "medium", "large-v3-turbo", "large"], default=["small", "medium"])
     
     st.markdown("**커스텀 모델 경로들 (쉼표로 구분하여 여러 개 입력 가능)**")
-    col_m1, col_m2 = st.columns([6, 1])
-    with col_m1: custom_models_str = st.text_input("커스텀 모델 경로들", "", label_visibility="collapsed")
-    with col_m2:
-        if st.button("📁추가", key="c_btn_cust"):
-            d = ask_directory()
-            if d: 
-                # Append to existing
-                cur = custom_models_str.strip()
-                new_val = f"{cur}, {d}" if cur else d
-                st.session_state["custom_models_str"] = new_val
-                st.success(f"경로를 복사하여 텍스트 상자에 붙여넣으세요:\n{d}")
+    custom_models_str = st.text_input("커스텀 모델 경로들", "", key="c_models_str")
+    with st.expander("📁 커스텀 모델 폴더 찾기 및 추가"):
+        st.caption("아래 브라우저에서 폴더를 탐색 후 '선택'하면 하단 텍스트 필드에 자동으로 경로가 세팅됩니다.")
+        inline_file_browser("comp_cust", "c_models_str", mode="dir")
     
     if st.button("비교 시작 🏁", type="primary"):
         target_p = comp_audio_path.strip()

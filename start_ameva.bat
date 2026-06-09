@@ -8,6 +8,12 @@ echo        AMEVA STT Enterprise Initialization Script
 echo ========================================================
 echo.
 
+:: 0. 기존 8501 포트(Streamlit) 프로세스 정리
+echo [*] 기존에 구동 중인 Streamlit(8501 포트) 프로세스가 있다면 정리합니다...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8501 ^| findstr LISTENING') do (
+    taskkill /f /pid %%a >nul 2>&1
+)
+
 :: 1. 파이썬 설치 확인
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
