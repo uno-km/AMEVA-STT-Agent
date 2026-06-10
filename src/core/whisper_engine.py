@@ -19,7 +19,7 @@ class WhisperEngineCPU:
         if os.path.isfile(self.model_size):
             return self.model_size, os.path.basename(self.model_size)
         
-        model_dir = r"C:\ameva\AI_Models\ggml"
+        model_dir = r"C:\ameva\models\stt"
         os.makedirs(model_dir, exist_ok=True)
         
         base_filename = f"ggml-{self.model_size}"
@@ -85,7 +85,7 @@ class WhisperEngineCPU:
 
             if not model_path:
                 output_queue.put(("system", f"⚠️ 유효한 모델 파일 없음. 신규 다운로드 시도: {model_name}"))
-                model = Model(model_name, models_dir=r"C:\ameva\AI_Models\ggml", n_threads=self.threads)
+                model = Model(model_name, models_dir=r"C:\ameva\models\stt", n_threads=self.threads)
             else:
                 output_queue.put(("system", f"⚙️ 엔진 초기화: {os.path.basename(model_path)} 로드 중..."))
                 model = Model(model_path, n_threads=self.threads)
