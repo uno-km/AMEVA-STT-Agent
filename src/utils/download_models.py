@@ -2,7 +2,7 @@ import os
 import urllib.request
 import sys
 
-MODELS_DIR = r"C:\ameva\AI_Models"
+MODELS_DIR = r"C:\ameva\models\stt"
 
 MODELS_TO_DOWNLOAD = {
     "ggml-medium-q5_0.bin": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",

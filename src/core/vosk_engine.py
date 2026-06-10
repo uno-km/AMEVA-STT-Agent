@@ -6,7 +6,7 @@ import traceback
 from vosk import Model as VoskModel, SpkModel, KaldiRecognizer
 
 class VoskEngineCPU:
-    def __init__(self, model_path=r"C:\ameva\AI_Models\vosk\ko-model", spk_model_path=r"C:\ameva\AI_Models\vosk\spk-model"):
+    def __init__(self, model_path=r"C:\ameva\models\stt\vosk\ko-model", spk_model_path=r"C:\ameva\models\stt\vosk\spk-model"):
         self.model_path = model_path
         self.spk_model_path = spk_model_path
 

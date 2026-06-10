@@ -138,8 +138,8 @@ def worker_diarization_forced(audio_path, stt_segments, output_queue):
     output_queue.put(("log", f"[Diarization Worker] Forced Diarization 가동 중 (총 {len(stt_segments)}개 문장)..."))
     start_time = time.time()
     
-    model_path = r"C:\ameva\AI_Models\vosk\ko-model"
-    spk_model_path = r"C:\ameva\AI_Models\vosk\spk-model"
+    model_path = r"C:\ameva\models\stt\vosk\ko-model"
+    spk_model_path = r"C:\ameva\models\stt\vosk\spk-model"
     
     if not os.path.exists(model_path) or not os.path.exists(spk_model_path):
         output_queue.put(("log", f"❌ 치명적 오류: Vosk 화자 모델 폴더가 삭제되었습니다!"))
