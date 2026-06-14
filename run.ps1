@@ -1,25 +1,29 @@
-$Host.UI.RawUI.WindowTitle = "AMEVA STT Enterprise - Bootstrapper"
+# AMEVA STT Agent 실행 및 환경 진단 스크립트
 
-Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host "       AMEVA STT Enterprise Initialization Script" -ForegroundColor Cyan
-Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host ""
+$ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+if ($ScriptPath) { Set-Location -Path $ScriptPath }
 
-# 0. Clean port 8500
-Write-Host "[*] Checking and cleaning port 8500..." -ForegroundColor Yellow
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+if ($PSVersionTable.PSVersion.Major -le 5) { chcp 65001 | Out-Null }
+$ErrorActionPreference = "Stop"
+
+Write-Host "--- AMEVA STT Agent Environment Setup ---" -ForegroundColor Cyan
+Write-Host "Path: $(Get-Location)" -ForegroundColor Gray
+
+# [0] 8500 포트 점유 프로세스 정리
+Write-Host "Checking port 8500..." -ForegroundColor Yellow
 $proc = Get-NetTCPConnection -LocalPort 8500 -State Listen -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[*] Killing existing process holding port 8500 (PID: $($proc.OwningProcess))..." -ForegroundColor DarkYellow
+    Write-Host "Killing existing process holding port 8500 (PID: $($proc.OwningProcess))..." -ForegroundColor DarkYellow
     Stop-Process -Id $proc.OwningProcess -Force -ErrorAction SilentlyContinue
 }
-Write-Host "[OK] Port 8500 is clean." -ForegroundColor Green
 
-# 0-1. ffmpeg 자율 설치 및 바인딩
+# [1] FFmpeg 자율 설치 및 바인딩
 $ffmpegPath = "C:\ffmpeg\bin"
 if (-not (Test-Path "$ffmpegPath\ffmpeg.exe")) {
-    Write-Host "[*] ffmpeg not found. Installing ffmpeg automatically..." -ForegroundColor Yellow
+    Write-Host "ffmpeg not found. Installing ffmpeg automatically..." -ForegroundColor Yellow
     
-    # 기존에 파일 형식으로 잘못 복사된 bin 파일 강제 제거
     if (Test-Path "C:\ffmpeg\bin") {
         if (-not (Get-Item "C:\ffmpeg\bin" | Where-Object { $_.PSIsContainer })) {
             Remove-Item -Path "C:\ffmpeg\bin" -Force -ErrorAction SilentlyContinue
@@ -33,46 +37,42 @@ if (-not (Test-Path "$ffmpegPath\ffmpeg.exe")) {
     $downloadUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
     
     try {
-        Write-Host "[*] Downloading ffmpeg static essentials zip..." -ForegroundColor Yellow
+        Write-Host "Downloading ffmpeg static essentials zip..." -ForegroundColor Yellow
         Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 600
         
-        Write-Host "[*] Extracting ffmpeg archive..." -ForegroundColor Yellow
+        Write-Host "Extracting ffmpeg archive..." -ForegroundColor Yellow
         Expand-Archive -Path $zipPath -DestinationPath "C:\ffmpeg\extracted" -Force
         
-        # 압축해제된 하위 폴더에서 bin 내용 찾아 복사
         $binFolder = Get-ChildItem -Path "C:\ffmpeg\extracted" -Recurse -Directory -Filter "bin" | Select-Object -First 1
         if ($binFolder) {
             Copy-Item -Path "$($binFolder.FullName)\*" -Destination "C:\ffmpeg\bin" -Recurse -Force
-            Write-Host "[OK] ffmpeg and ffprobe installed successfully to C:\ffmpeg\bin" -ForegroundColor Green
+            Write-Host "ffmpeg and ffprobe installed successfully to C:\ffmpeg\bin" -ForegroundColor Green
         } else {
             throw "Failed to find bin folder inside zip"
         }
         
-        # 임시 파일 정리
         Remove-Item -Path "C:\ffmpeg\extracted" -Recurse -Force
         Remove-Item -Path $zipPath -Force
     } catch {
-        Write-Host "[ERROR] Failed to install ffmpeg automatically: $_" -ForegroundColor Red
-        Write-Host "[WARN] Audio conversion and YouTube audio extraction will not work without ffmpeg." -ForegroundColor Yellow
+        Write-Host "Failed to install ffmpeg automatically: $_" -ForegroundColor Red
+        Write-Host "Audio conversion and YouTube audio extraction will not work without ffmpeg." -ForegroundColor Yellow
     }
 }
 
-# ffmpeg PATH 임시 등록
 if (Test-Path "$ffmpegPath\ffmpeg.exe") {
     if ($env:PATH -notmatch "C:\\ffmpeg\\bin") {
         $env:PATH += ";C:\ffmpeg\bin"
         [System.Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
     }
-    # 사용자 PATH 레지스트리에도 등록 (재부팅 시 자동 유지)
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath -notmatch "C:\\ffmpeg\\bin") {
         [Environment]::SetEnvironmentVariable("Path", $userPath + ";C:\ffmpeg\bin", "User")
     }
-    Write-Host "[OK] ffmpeg and ffprobe mapped in PATH." -ForegroundColor Green
+    Write-Host "ffmpeg mapped in PATH." -ForegroundColor Green
 }
 
-# 1. Hardware Profiling & GPU Detection
-Write-Host "[*] Scanning Hardware Profile..." -ForegroundColor Yellow
+# [2] 하드웨어 감지 및 CUDA Toolkit 체크
+Write-Host "Scanning Hardware Profile..." -ForegroundColor Yellow
 $videoControllers = Get-CimInstance Win32_VideoController
 $hasNvidia = $false
 $gpuName = ""
@@ -84,96 +84,79 @@ foreach ($vc in $videoControllers) {
 }
 
 if ($hasNvidia) {
-    Write-Host "[OK] NVIDIA GPU detected: $gpuName" -ForegroundColor Green
+    Write-Host "NVIDIA GPU detected: $gpuName" -ForegroundColor Green
     
-    # CUDA_PATH 임시 바인딩 보정
     if (-not $env:CUDA_PATH) {
-        Write-Host "[*] CUDA_PATH environment variable missing. Searching registry..." -ForegroundColor Yellow
+        Write-Host "CUDA_PATH environment variable missing. Searching registry..." -ForegroundColor Yellow
         $machineCuda = [Environment]::GetEnvironmentVariable('CUDA_PATH', 'Machine')
         if ($machineCuda) {
             [Environment]::SetEnvironmentVariable('CUDA_PATH', $machineCuda, 'Process')
             $env:CUDA_PATH = $machineCuda
             $env:PATH += ";$machineCuda\bin"
-            Write-Host "[OK] Found CUDA_PATH in Registry: $machineCuda (Loaded temporarily)" -ForegroundColor Green
+            Write-Host "Found CUDA_PATH in Registry: $machineCuda" -ForegroundColor Green
         } else {
-            Write-Host "[WARN] CUDA_PATH registry key not found. CUDA acceleration might fail." -ForegroundColor Yellow
+            Write-Host "[WARNING] CUDA_PATH registry key not found. CUDA acceleration might fail." -ForegroundColor Yellow
         }
-    } else {
-        Write-Host "[OK] CUDA_PATH is active: $env:CUDA_PATH" -ForegroundColor Green
     }
-} else {
-    Write-Host "[*] No NVIDIA GPU detected. Targets set to CPU modes." -ForegroundColor Yellow
 }
 
-# 2. Check Python
-$py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) {
-    Write-Host "[ERROR] Python is not installed or not in PATH." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit
+# [3] 가상환경(venv) 검증
+$EnvDir = ".\venv"
+if (-not (Test-Path -Path $EnvDir)) {
+    Write-Host "Virtual environment (venv) not found. Creating virtual environment..." -ForegroundColor Yellow
+    python -m venv $EnvDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create virtual environment."
+        exit 1
+    }
 }
-Write-Host "[OK] Python detected." -ForegroundColor Green
 
-# 3. Venv setup
-if (-not (Test-Path ".venv")) {
-    Write-Host "[*] Creating virtual environment (.venv)..." -ForegroundColor Yellow
-    python -m venv .venv
-}
-Write-Host "[OK] Virtual environment checked." -ForegroundColor Green
+# [4] 가상환경 활성화
+Write-Host "Activating virtual environment..." -ForegroundColor Cyan
+. "$EnvDir\Scripts\Activate.ps1"
 
-# 4. Activate virtual environment
-Write-Host "[*] Activating virtual environment..." -ForegroundColor Yellow
-. .venv\Scripts\Activate.ps1
-
-# 5. Dependency installation & Self-Healing Acceleration Setup
-Write-Host "[*] Installing pip-tools and upgrading core packages..." -ForegroundColor Yellow
-python -m pip install --upgrade pip setuptools wheel
+# [5] 종속성 설치 및 복구
+Write-Host "Upgrading core pip packages..." -ForegroundColor Yellow
+& "$EnvDir\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
 
 $gpuAccelerated = "False"
-
-# 5.1 PyTorch CUDA 설치 및 검증 (이미 최적의 버전이 있고 정상 작동하면 Skip)
 $hasTorchCuda = $false
 if ($hasNvidia) {
-    Write-Host "[*] Checking if PyTorch CUDA is already installed..." -ForegroundColor Yellow
-    $pytorchCudaCheck = python -c "import torch; print(torch.cuda.is_available())" 2>$null
+    $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "import torch; print(torch.cuda.is_available())" 2>$null
     if ($pytorchCudaCheck -match "True") {
-        Write-Host "[OK] PyTorch CUDA is already installed and functional." -ForegroundColor Green
+        Write-Host "PyTorch CUDA is already installed and functional." -ForegroundColor Green
         $hasTorchCuda = $true
     } else {
-        Write-Host "[*] PyTorch CUDA missing or inactive. Installing..." -ForegroundColor Yellow
-        pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --no-cache-dir
-        $pytorchCudaCheck = python -c "import torch; print(torch.cuda.is_available())" 2>$null
+        Write-Host "Installing PyTorch CUDA..." -ForegroundColor Yellow
+        & "$EnvDir\Scripts\pip.exe" install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --no-cache-dir
+        $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "import torch; print(torch.cuda.is_available())" 2>$null
         if ($pytorchCudaCheck -match "True") {
-            Write-Host "[OK] PyTorch CUDA installation and verification passed." -ForegroundColor Green
+            Write-Host "PyTorch CUDA verified." -ForegroundColor Green
             $hasTorchCuda = $true
         }
     }
 }
 
-# 5.2 faster-whisper 설치 및 검증
 $hasFasterWhisper = $false
 try {
-    $whisperCheck = python -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
+    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
     if ($whisperCheck -match "Success") {
-        Write-Host "[OK] faster-whisper is already installed and verified." -ForegroundColor Green
         $hasFasterWhisper = $true
     }
 } catch {}
 
 if (-not $hasFasterWhisper) {
-    Write-Host "[*] Installing faster-whisper..." -ForegroundColor Yellow
-    pip install faster-whisper --no-cache-dir
-    $whisperCheck = python -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
+    Write-Host "Installing faster-whisper..." -ForegroundColor Yellow
+    & "$EnvDir\Scripts\pip.exe" install faster-whisper --no-cache-dir
+    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
     if ($whisperCheck -match "Success") {
-        Write-Host "[OK] faster-whisper installed and verified." -ForegroundColor Green
         $hasFasterWhisper = $true
     }
 }
 
 if ($hasFasterWhisper) {
     if ($hasTorchCuda) {
-        Write-Host "[*] Verifying CUDA GPU acceleration with faster-whisper..." -ForegroundColor Yellow
-        $cudaTest = python -c "
+        $cudaTest = & "$EnvDir\Scripts\python.exe" -c "
 from faster_whisper import WhisperModel
 try:
     model = WhisperModel('tiny', device='cuda', compute_type='float16')
@@ -188,46 +171,31 @@ except Exception:
     print('Failed')
 " 2>$null
         if ($cudaTest -match "Success") {
-            Write-Host "[OK] CUDA acceleration successfully verified for faster-whisper!" -ForegroundColor Green
+            Write-Host "CUDA acceleration verified for faster-whisper." -ForegroundColor Green
             $gpuAccelerated = "True"
         } else {
-            Write-Host "[WARN] CUDA validation failed with faster-whisper. Falling back to CPU mode." -ForegroundColor DarkYellow
+            Write-Host "[WARNING] CUDA validation failed with faster-whisper. Falling back to CPU mode." -ForegroundColor Yellow
             $gpuAccelerated = "False"
         }
-    } else {
-        $gpuAccelerated = "False"
     }
-} else {
-    Write-Host "[ERROR] Failed to install/verify faster-whisper." -ForegroundColor Red
-    $gpuAccelerated = "False"
 }
 
-# 나머지 requirements.txt 패키지들 설치
-Write-Host "[*] Installing auxiliary packages from requirements.txt..." -ForegroundColor Yellow
-pip install streamlit plotly pandas matplotlib numpy scipy scikit-learn vosk python-docx yt-dlp
+Write-Host "Installing requirements..." -ForegroundColor Yellow
+& "$EnvDir\Scripts\pip.exe" install streamlit plotly pandas matplotlib numpy scipy scikit-learn vosk python-docx yt-dlp --upgrade --quiet
 
-Write-Host "[OK] Dependencies ready. (GPU Acceleration: $gpuAccelerated)" -ForegroundColor Green
-
-# 6. Make directories
-$paths = @("C:\ameva\input", "C:\ameva\outputs", "C:\ameva\AMEVA-STT-Agent\db")
+# [6] 폴더 생성
+$paths = @("C:\ameva\input", "C:\ameva\outputs", "$ScriptPath\db")
 foreach ($p in $paths) {
     if (-not (Test-Path $p)) {
         New-Item -ItemType Directory -Force -Path $p | Out-Null
     }
 }
 
-# 7. Launch
-Write-Host ""
-Write-Host "========================================================" -ForegroundColor Green
-if ($gpuAccelerated -eq "True") {
-    Write-Host "   🚀 Launching AMEVA STT Enterprise (GPU CUDA ACCELERATED)..." -ForegroundColor Green
-} else {
-    Write-Host "   🚀 Launching AMEVA STT Enterprise (CPU FALLBACK MODE)..." -ForegroundColor Yellow
-}
-Write-Host "========================================================" -ForegroundColor Green
-
+# [7] 실행 가동
+Write-Host "Launching AMEVA STT Agent..." -ForegroundColor Cyan
 $env:AMEVA_GPU_ACCELERATED = "$gpuAccelerated"
 $env:AMEVA_GPU_NAME = "$gpuName"
+$env:PYTHONUNBUFFERED = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
-streamlit run app.py --server.port 8500
-
+& "$EnvDir\Scripts\streamlit.exe" run app.py --server.port 8500
