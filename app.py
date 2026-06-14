@@ -154,15 +154,19 @@ def main():
     model_dir = settings_manager.get("models_dir")
     if not isinstance(model_dir, str) or not model_dir:
         model_dir = r"C:\ameva\models\stt"
-    base_filename = f"ggml-{model_size}"
-    if model_size == "large-v3-turbo": base_filename = "ggml-large-v3-turbo"
-    elif model_size == "large": base_filename = "ggml-large-v3"
+    
     model_exists = False
     if os.path.exists(model_dir):
-        for f in os.listdir(model_dir):
-            if f.startswith(base_filename) and f.endswith(".bin"):
-                model_exists = True
-                break
+        mapped_name = model_size
+        if model_size == "large-v3-turbo": mapped_name = "large-v3-turbo"
+        elif model_size == "large": mapped_name = "large"
+        
+        # Look for model files (model.bin and config.json) in folder matching mapped_name
+        for root, dirs, files in os.walk(model_dir):
+            if "model.bin" in files and "config.json" in files:
+                if mapped_name in root.lower():
+                    model_exists = True
+                    break
     
     if model_exists:
         st.sidebar.markdown(f"**상태:** 🟢 로컬 내장 완료 (`{model_dir}`)")
@@ -171,12 +175,9 @@ def main():
         if st.sidebar.button(f"⬇️ '{model_size}' 모델 다운로드"):
             with st.sidebar.status("모델을 다운로드하고 있습니다...", expanded=True) as status:
                 try:
-                    from pywhispercpp.utils import download_model
+                    from faster_whisper import WhisperModel
                     with st.spinner(f"Hugging Face 서버에서 {model_size} 다운로드 중..."):
-                        dl_name = model_size
-                        if model_size == "large-v3-turbo": dl_name = "large-v3-turbo"
-                        elif model_size == "large": dl_name = "large-v3"
-                        download_model(dl_name, download_dir=model_dir)
+                        WhisperModel(model_size, device="cpu", compute_type="int8", download_root=model_dir)
                     status.update(label="다운로드 완료!", state="complete", expanded=False)
                     st.toast(f"🎉 {model_size} 모델 다운로드가 완료되었습니다!", icon="✅")
                     time.sleep(1)
@@ -480,7 +481,6 @@ def main():
                                     proc_time = time.time() - start_t
                                     
                                 # Log to DB
-                                from src.db.db_manager import log_batch
                                 log_batch("YOUTUBE_DOWNLOAD", yt_url.strip(), "yt-dlp", "auto", proc_time, f"SUCCESS: {os.path.basename(mp3_filename)}")
                                 
                                 st.session_state["ui_comp_path"] = mp3_filename
@@ -756,14 +756,12 @@ def main():
                                 proc_time = time.time() - start_t
                             
                             # DB Log (기록 저장)
-                            from src.db.db_manager import log_batch
                             log_batch("YOUTUBE_SINGLE_DOWNLOAD", single_url.strip(), "yt-dlp", "auto", proc_time, f"SUCCESS: {os.path.basename(mp3_filename)}")
                             
                             st.success(f"🎉 다운로드 완료!\n저장 위치: {mp3_filename}")
                             st.audio(mp3_filename)
                         except Exception as e:
                             st.error(f"다운로드 실패: {e}")
-                            from src.db.db_manager import log_error
                             log_error("YouTube Single Downloader", str(e))
                             
         else:
@@ -852,14 +850,12 @@ def main():
                                     proc_time = time.time() - start_t
                                 
                                 # DB Log
-                                from src.db.db_manager import log_batch
                                 log_batch("YOUTUBE_BATCH_DOWNLOAD", v_url, "yt-dlp", "auto", proc_time, f"SUCCESS: {os.path.basename(mp3_filename)}")
                                 
                                 success_count += 1
                                 logs.append(f"✅ 성공 ({idx+1}/{len(selected_urls)}): {os.path.basename(mp3_filename)}")
                             except Exception as e:
                                 logs.append(f"❌ 실패 ({idx+1}/{len(selected_urls)}): {v_title[:30]}... ({e})")
-                                from src.db.db_manager import log_error
                                 log_error("YouTube Batch Downloader", f"URL: {v_url} | Error: {e}")
                                 
                             progress_bar.progress((idx + 1) / len(selected_urls))

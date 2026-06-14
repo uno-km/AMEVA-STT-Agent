@@ -150,54 +150,56 @@ if ($hasNvidia) {
     }
 }
 
-# 5.2 pywhispercpp 설치 및 검증 (이미 설치되어 있으면 Skip, 없으면 빌드 시도 및 Fallback)
-$hasPywhispercpp = $false
+# 5.2 faster-whisper 설치 및 검증
+$hasFasterWhisper = $false
 try {
-    $whisperCheck = python -c "from pywhispercpp.model import Model; print('Success')" 2>$null
+    $whisperCheck = python -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
     if ($whisperCheck -match "Success") {
-        Write-Host "[OK] pywhispercpp is already installed and verified." -ForegroundColor Green
-        $hasPywhispercpp = $true
+        Write-Host "[OK] faster-whisper is already installed and verified." -ForegroundColor Green
+        $hasFasterWhisper = $true
     }
 } catch {}
 
-if (-not $hasPywhispercpp) {
+if (-not $hasFasterWhisper) {
+    Write-Host "[*] Installing faster-whisper..." -ForegroundColor Yellow
+    pip install faster-whisper --no-cache-dir
+    $whisperCheck = python -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
+    if ($whisperCheck -match "Success") {
+        Write-Host "[OK] faster-whisper installed and verified." -ForegroundColor Green
+        $hasFasterWhisper = $true
+    }
+}
+
+if ($hasFasterWhisper) {
     if ($hasTorchCuda) {
-        # GGML_CUDA=1 환경변수를 사용해 소스 빌드 시도
-        $env:GGML_CUDA = "1"
-        try {
-            Write-Host "[*] Attempting to compile pywhispercpp with CUDA acceleration..." -ForegroundColor Yellow
-            pip install pywhispercpp --no-binary pywhispercpp --no-cache-dir
-            
-            # 빌드 성공 체크
-            $buildCheck = python -c "from pywhispercpp.model import Model; print('Success')" 2>$null
-            if ($buildCheck -match "Success") {
-                Write-Host "[OK] pywhispercpp CUDA build successful! GPU acceleration active." -ForegroundColor Green
-                $gpuAccelerated = "True"
-            } else {
-                throw "Validation failed"
-            }
-        } catch {
-            Write-Host "[WARN] CUDA compilation failed. Falling back to CPU pre-built version..." -ForegroundColor DarkYellow
-            $env:GGML_CUDA = "0"
-            pip install pywhispercpp --no-cache-dir
+        Write-Host "[*] Verifying CUDA GPU acceleration with faster-whisper..." -ForegroundColor Yellow
+        $cudaTest = python -c "
+from faster_whisper import WhisperModel
+try:
+    model = WhisperModel('tiny', device='cuda', compute_type='float16')
+    print('Success')
+except ValueError:
+    try:
+        model = WhisperModel('tiny', device='cuda', compute_type='int8_float16')
+        print('Success')
+    except Exception:
+        print('Failed')
+except Exception:
+    print('Failed')
+" 2>$null
+        if ($cudaTest -match "Success") {
+            Write-Host "[OK] CUDA acceleration successfully verified for faster-whisper!" -ForegroundColor Green
+            $gpuAccelerated = "True"
+        } else {
+            Write-Host "[WARN] CUDA validation failed with faster-whisper. Falling back to CPU mode." -ForegroundColor DarkYellow
             $gpuAccelerated = "False"
         }
     } else {
-        if ($hasNvidia) {
-            Write-Host "[WARN] Fallback: Installing CPU-optimized PyTorch and pywhispercpp..." -ForegroundColor DarkYellow
-            pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
-        } else {
-            Write-Host "[*] Installing CPU-optimized PyTorch and pywhispercpp..." -ForegroundColor Yellow
-            pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-        }
-        pip install pywhispercpp
         $gpuAccelerated = "False"
     }
 } else {
-    # 이미 pywhispercpp와 torch가 존재할 때, GPU 가속여부 매핑
-    if ($hasTorchCuda) {
-        $gpuAccelerated = "True"
-    }
+    Write-Host "[ERROR] Failed to install/verify faster-whisper." -ForegroundColor Red
+    $gpuAccelerated = "False"
 }
 
 # 나머지 requirements.txt 패키지들 설치

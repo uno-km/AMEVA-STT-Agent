@@ -7,7 +7,7 @@ import subprocess
 import wave
 import traceback
 import queue
-from pywhispercpp.model import Model
+from faster_whisper import WhisperModel
 from src.core.settings_manager import settings_manager
 from datetime import datetime
 from vosk import Model as VoskModel, SpkModel, KaldiRecognizer
@@ -18,13 +18,11 @@ import random
 
 def worker_stt(audio_path, model_size, language, threads, output_queue, config=None):
     """
-    GGML (whisper.cpp) 전사 워커 (CPU 전용, 멀티프로세스)
+    faster-whisper 전사 워커 (GPU 가속 지원, 멀티프로세스)
     """
     config = config or {}
-    max_len = config.get("max_len", 20)
-    split_on_word = config.get("split_on_word", True)
     
-    # C-level stderr 가로채기 설정
+    # C-level stderr 가로채기 설정 (필요시 로그 캡처 유지)
     import os, sys, threading
     try:
         r_fd, w_fd = os.pipe()
@@ -50,14 +48,18 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
     except:
         pass
 
-    output_queue.put(("log", f"[STT Worker] GGML 엔진 시작: 모델({model_size}), 언어({language})"))
+    output_queue.put(("log", f"[STT Worker] faster-whisper 엔진 시작: 모델({model_size}), 언어({language})"))
     start = time.time()
 
     # GPU 가속 상태 진단 및 VRAM 경고
+    device = "cpu"
+    compute_type = "int8"
     try:
         import torch
         cuda_avail = torch.cuda.is_available()
         if cuda_avail:
+            device = "cuda"
+            compute_type = "float16"
             device_name = torch.cuda.get_device_name(0)
             total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             output_queue.put(("system", f"🟢 GPU 가속 활성화: {device_name} (VRAM: {total_vram:.1f} GB)"))
@@ -75,68 +77,83 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
         h = int(seconds // 3600)
         return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
-    def new_segment_callback(segment):
-        ts_start = format_ts(segment.t0 / 100.0)
-        ts_end = format_ts(segment.t1 / 100.0)
-        text = segment.text.strip()
-        if text:
-            msg = f"[{ts_start} --> {ts_end}]  {text}"
-            output_queue.put(("log", msg))
-    
     try:
-        model_path = None
-        # 사용자 지정 경로 여부 확인 (파일 시스템에 직접 존재하는 경우)
-        if os.path.isfile(model_size):
-            model_path = model_size
-            model_name = os.path.basename(model_path)
-        else:
-            from src.core.settings_manager import settings_manager
-            model_dir = settings_manager.get("models_dir", r"C:\ameva\models\stt")
-            os.makedirs(model_dir, exist_ok=True)
-            
-            base_filename = f"ggml-{model_size}"
-            if model_size == "turbo": base_filename = "ggml-large-v3-turbo"
-            elif model_size == "large": base_filename = "ggml-large-v3"
-            
-            if os.path.exists(model_dir):
-                for f in os.listdir(model_dir):
-                    if f.startswith(base_filename) and f.endswith(".bin") and os.path.getsize(os.path.join(model_dir, f)) > 1024*1024:
-                        model_path = os.path.join(model_dir, f)
+        from src.core.settings_manager import settings_manager
+        val = settings_manager.get("models_dir")
+        model_dir = val if val and isinstance(val, str) else r"C:\ameva\models\stt"
+        os.makedirs(model_dir, exist_ok=True)
+        
+        model_name = model_size
+        if model_size == "turbo": model_name = "large-v3-turbo"
+        elif model_size == "large": model_name = "large-v3"
+        
+        # 모델 캐시 존재 여부 검사
+        model_exists = False
+        if os.path.exists(model_dir):
+            for root, dirs, files in os.walk(model_dir):
+                if "model.bin" in files and "config.json" in files:
+                    if model_name in root.lower():
+                        model_exists = True
                         break
-            
-            # pywhispercpp가 인식할 수 있는 모델 이름으로 매핑
-            model_name = model_size
-            if model_size == "turbo": model_name = "large-v3-turbo"
-            elif model_size == "large": model_name = "large-v3"
 
-        if not model_path:
-            output_queue.put(("system", f"⚠️ 유효한 모델 파일 없음. 신규 다운로드 시도: {model_name}"))
-            from pywhispercpp.utils import download_model
-            try:
-                download_model(model_name, download_dir=model_dir)
-            except Exception as e:
-                output_queue.put(("system", f"❌ 다운로드 실패: {e}"))
-            model = Model(model_name, models_dir=model_dir, n_threads=threads)
+        if not model_exists:
+            output_queue.put(("system", f"⚠️ 유효한 로컬 모델 폴더 없음. 자동 다운로드 시도: {model_name}"))
         else:
-            output_queue.put(("system", f"⚙️ 엔진 초기화: {os.path.basename(model_path)} 로드 중..."))
-            model = Model(model_path, n_threads=threads)
-            output_queue.put(("system", f"✅ 모델 로드 완료"))
+            output_queue.put(("system", f"⚙️ 엔진 초기화: {model_name} 로드 중..."))
             
-        segments = model.transcribe(
+        try:
+            model = WhisperModel(
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                cpu_threads=threads,
+                download_root=model_dir
+            )
+        except ValueError as e:
+            if device == "cuda" and "compute type" in str(e).lower():
+                output_queue.put(("system", "⚠️ GPU가 float16 고속 연산을 지원하지 않아 int8_float16 모드로 전환합니다."))
+                try:
+                    model = WhisperModel(
+                        model_name,
+                        device=device,
+                        compute_type="int8_float16",
+                        cpu_threads=threads,
+                        download_root=model_dir
+                    )
+                except Exception:
+                    output_queue.put(("system", "⚠️ int8_float16 로드 실패. float32 모드로 최종 시도합니다."))
+                    model = WhisperModel(
+                        model_name,
+                        device=device,
+                        compute_type="float32",
+                        cpu_threads=threads,
+                        download_root=model_dir
+                    )
+            else:
+                raise e
+        output_queue.put(("system", f"✅ 모델 로드 완료"))
+            
+        segments, info = model.transcribe(
             audio_path, 
             language=language if language != "auto" else None,
-            new_segment_callback=new_segment_callback,
-            max_len=max_len if max_len > 0 else None,
-            split_on_word=split_on_word,
+            beam_size=5
         )
+
+        output_queue.put(("log", f"[STT Worker] 언어 감지 결과: {info.language} (확률: {info.language_probability:.2f})"))
 
         results = []
         for s in segments:
-            results.append({
-                "start": s.t0 / 100.0,
-                "end": s.t1 / 100.0,
-                "text": s.text.strip()
-            })
+            ts_start = format_ts(s.start)
+            ts_end = format_ts(s.end)
+            text = s.text.strip()
+            if text:
+                msg = f"[{ts_start} --> {ts_end}]  {text}"
+                output_queue.put(("log", msg))
+                results.append({
+                    "start": s.start,
+                    "end": s.end,
+                    "text": text
+                })
             
         elapsed = time.time() - start
         output_queue.put(("log", f"[STT Worker] 완료 ({elapsed:.1f}초) - {len(results)}개 문장 추출"))
