@@ -18,7 +18,16 @@ Write-Host "[OK] Port 8501 is clean." -ForegroundColor Green
 $ffmpegPath = "C:\ffmpeg\bin"
 if (-not (Test-Path "$ffmpegPath\ffmpeg.exe")) {
     Write-Host "[*] ffmpeg not found. Installing ffmpeg automatically..." -ForegroundColor Yellow
+    
+    # 기존에 파일 형식으로 잘못 복사된 bin 파일 강제 제거
+    if (Test-Path "C:\ffmpeg\bin") {
+        if (-not (Get-Item "C:\ffmpeg\bin" | Where-Object { $_.PSIsContainer })) {
+            Remove-Item -Path "C:\ffmpeg\bin" -Force -ErrorAction SilentlyContinue
+        }
+    }
+    
     New-Item -ItemType Directory -Path "C:\ffmpeg" -Force | Out-Null
+    New-Item -ItemType Directory -Path "C:\ffmpeg\bin" -Force | Out-Null
     
     $zipPath = "C:\ffmpeg\ffmpeg.zip"
     $downloadUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
