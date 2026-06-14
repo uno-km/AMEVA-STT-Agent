@@ -466,7 +466,8 @@ def main():
                                         'preferredquality': '192',
                                     }],
                                     'outtmpl': out_tmpl,
-                                    'quiet': True
+                                    'quiet': True,
+                                    'ffmpeg_location': r'C:\ffmpeg\bin'
                                 }
                                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                                     start_t = time.time()
@@ -740,7 +741,8 @@ def main():
                                 'preferredquality': '192',
                             }],
                             'outtmpl': out_tmpl,
-                            'quiet': True
+                            'quiet': True,
+                            'ffmpeg_location': r'C:\ffmpeg\bin'
                         }
                         try:
                             start_t = time.time()
@@ -834,7 +836,8 @@ def main():
                                     'preferredquality': '192',
                                 }],
                                 'outtmpl': out_tmpl,
-                                'quiet': True
+                                'quiet': True,
+                                'ffmpeg_location': r'C:\ffmpeg\bin'
                             }
                             
                             try:
