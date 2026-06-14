@@ -308,6 +308,10 @@ def main():
                 st.audio(current_m_path)
                     
             if st.button("수동 작업 즉시 시작 🚀", use_container_width=True, type="primary"):
+                for k in ["last_audio", "last_report_path", "last_stats", "last_text", "last_chunks", "last_json", "last_cluster"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                        
                 target_p = ""
                 if uploaded_file is not None:
                     os.makedirs(batch_settings.get("input_dir", r"C:\ameva\input"), exist_ok=True)
@@ -425,6 +429,7 @@ def main():
                                 
                                 try:
                                     report_path = create_stt_report(t, out_dir, st.session_state["last_stats"], chunks_data, chart_path, task_id="MANUAL_BATCH", clustering_data=clustering_data)
+                                    st.session_state["last_report_path"] = report_path
                                     log_callback(f"[Report] Word 보고서 자동 생성 완료: {os.path.basename(report_path)}")
                                 except Exception as err_r:
                                     log_callback(f"[Report] Word 보고서 생성 실패: {err_r}")
@@ -504,7 +509,40 @@ def main():
                                         log_error("Auto Loop Process", str(auto_e))
                         time.sleep(interval)
                         log_callback("[*] 대기 시간 종료, 다음 스캔을 시작합니다.")
-    
+        
+        # --- TAB 1 Results Display (rendered when not actively running) ---
+        if st.session_state.get("run_mode", "none") == "none" and "last_audio" in st.session_state:
+            st.markdown("---")
+            st.subheader("📊 최근 작업 완료 리포트")
+            st.success(f"🎉 작업 완료: `{os.path.basename(st.session_state['last_audio'])}`")
+            
+            # Show download button for the report if it exists
+            if "last_report_path" in st.session_state and os.path.exists(st.session_state["last_report_path"]):
+                with open(st.session_state["last_report_path"], "rb") as f:
+                    report_data = f.read()
+                st.download_button(
+                    label="📑 Word 분석 보고서 다운로드 (DOCX)",
+                    data=report_data,
+                    file_name=os.path.basename(st.session_state["last_report_path"]),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="download_last_report_docx",
+                    type="primary",
+                    use_container_width=True
+                )
+            else:
+                st.warning("⚠️ 자동 생성된 Word 보고서 파일을 찾을 수 없습니다. 탐색기 탭에서 다시 생성할 수 있습니다.")
+                
+            # Quick Stats
+            stats = st.session_state.get("last_stats", {})
+            if stats:
+                col_s1, col_s2, col_s3 = st.columns(3)
+                col_s1.metric("소요 시간 (Processing Time)", f"{stats.get('processing_time_sec', 0):.2f} 초")
+                col_s2.metric("사용 엔진 모델 (Model)", stats.get('model', 'Unknown'))
+                col_s3.metric("화자 분리 (Diarization)", "활성화 (Vosk)" if stats.get('diarization_enabled') else "비활성화")
+                
+            # Full Text Preview
+            with st.expander("📝 전사 텍스트 전체 보기"):
+                st.text_area("전체 텍스트", value=st.session_state.get("last_text", ""), height=250, label_visibility="collapsed")
     
     # --- TAB 2: MODEL COMPARISON ---
     with tab_compare:
@@ -779,21 +817,169 @@ def main():
                     except Exception as e:
                         st.error(f"상세 비교표 생성 중 오류 발생: {e}")
                     
-                    if st.button("📑 종합 비교 리포트(Word) 생성 및 다운로드", type="primary"):
-                        with st.spinner("비교 리포트를 생성하고 있습니다..."):
-                            audio_p = st.session_state["comp_targets"][0] if st.session_state["comp_targets"] else "Multiple_Files"
-                            r_path = create_comparison_report(audio_p, out_dir, st.session_state["comp_results"], task_id="Comparison")
-                            st.session_state["compare_report_path"] = r_path
-                            st.rerun()
+                    if "compare_report_path" not in st.session_state or not st.session_state["compare_report_path"] or not os.path.exists(st.session_state["compare_report_path"]):
+                        audio_p = st.session_state["comp_targets"][0] if st.session_state["comp_targets"] else "Multiple_Files"
+                        r_path = create_comparison_report(audio_p, out_dir, st.session_state["comp_results"], task_id="Comparison")
+                        st.session_state["compare_report_path"] = r_path
                             
                     if "compare_report_path" in st.session_state and os.path.exists(st.session_state["compare_report_path"]):
                         with open(st.session_state["compare_report_path"], "rb") as f:
-                            st.download_button(
-                                label="⬇️ 비교 리포트 다운로드 (DOCX)", data=f, 
-                                file_name=os.path.basename(st.session_state["compare_report_path"]), 
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                key="download_compare_docx"
-                            )
+                            compare_file_data = f.read()
+                        st.download_button(
+                            label="📑 종합 비교 리포트(Word) 다운로드 (DOCX)", data=compare_file_data, 
+                            file_name=os.path.basename(st.session_state["compare_report_path"]), 
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="download_compare_docx",
+                            type="primary",
+                            use_container_width=True
+                        )
+
+        # --- 과거 비교 결과로 보고서 재생성 섹션 ---
+        st.markdown("---")
+        st.subheader("📜 과거 비교 결과에서 보고서 재생성")
+        st.markdown("이미 완료된 과거 다중 모델 비교 결과를 탐색하여 모델 간 비교 보고서를 다시 생성할 수 있습니다.")
+        
+        try:
+            out_dir = batch_settings.get("output_dir", r"C:\ameva\outputs")
+            # outputs 폴더 스캔
+            comp_files = []
+            if os.path.exists(out_dir):
+                for f in os.listdir(out_dir):
+                    if f.startswith("COMP_") and f.endswith(".json") and not f.endswith("_clusters.json") and not f.endswith("_converted.json"):
+                        comp_files.append(f)
+            
+            # Group by audio name
+            known_models = ["tiny", "small", "medium", "large-v3-turbo", "large"]
+            groups = {}
+            for f in comp_files:
+                rest = f[5:] # strip "COMP_"
+                model_name = None
+                audio_name = None
+                for km in known_models:
+                    if rest.startswith(km + "_"):
+                        model_name = km
+                        audio_name = rest[len(km)+1:-5]
+                        break
+                if not model_name:
+                    parts = rest.split("_", 1)
+                    if len(parts) > 1:
+                        model_name = parts[0]
+                        audio_name = parts[1][:-5]
+                    else:
+                        model_name = "custom"
+                        audio_name = rest[:-5]
+                
+                if audio_name:
+                    if audio_name not in groups:
+                        groups[audio_name] = {}
+                    groups[audio_name][model_name] = f
+            
+            if groups:
+                # Track selection change to clear stale report paths
+                prev_selection = st.session_state.get("last_hist_selection", "")
+                selected_hist_audio = st.selectbox("과거 비교 미디어 선택", list(groups.keys()), key="sb_hist_compare")
+                if selected_hist_audio != prev_selection:
+                    st.session_state["last_hist_selection"] = selected_hist_audio
+                    if st.session_state.get("compare_report_source") == "history":
+                        if "compare_report_path" in st.session_state:
+                            del st.session_state["compare_report_path"]
+                        st.session_state["compare_report_source"] = "none"
+
+                hist_models = groups[selected_hist_audio]
+                st.info(f"선택한 미디어에서 발견된 모델 결과: **{', '.join(hist_models.keys())}**")
+                
+                if st.button("📑 선택한 과거 데이터로 Word 비교 보고서 생성", type="primary", key="btn_hist_compare"):
+                    with st.spinner("과거 결과를 읽어 비교 보고서를 생성 중..."):
+                        hist_results = {}
+                        audio_p_fallback = os.path.join(batch_settings.get("input_dir", r"C:\ameva\input"), f"{selected_hist_audio}.wav")
+                        if not os.path.exists(audio_p_fallback):
+                            audio_p_fallback = os.path.join(out_dir, hist_models[list(hist_models.keys())[0]])
+                        
+                        for m_name, f_json in hist_models.items():
+                            json_path = os.path.join(out_dir, f_json)
+                            with open(json_path, "r", encoding="utf-8") as jf:
+                                chunks_data = json.load(jf)
+                            
+                            # Find duration/processing time from DB
+                            proc_time = 0.0
+                            try:
+                                import sqlite3
+                                conn = sqlite3.connect("db/ameva_stt.db")
+                                cursor = conn.cursor()
+                                cursor.execute("SELECT duration FROM batch_logs WHERE original_filename LIKE ? AND model = ? AND status='SUCCESS' ORDER BY id DESC LIMIT 1", (f"%{selected_hist_audio}%", m_name))
+                                row = cursor.fetchone()
+                                conn.close()
+                                if row:
+                                    proc_time = float(row[0])
+                            except:
+                                pass
+                            
+                            # Check if cluster file exists to generate chart
+                            chart_p = None
+                            cluster_file_name = f_json[:-5] + "_clusters.json"
+                            cluster_file_path = None
+                            db_root = r"c:\ameva\AMEVA-STT-Agent\db\clusters"
+                            if os.path.exists(db_root):
+                                for root_d, _, files_d in os.walk(db_root):
+                                    if cluster_file_name in files_d:
+                                        cluster_file_path = os.path.join(root_d, cluster_file_name)
+                                        break
+                                        
+                            if cluster_file_path and os.path.exists(cluster_file_path):
+                                try:
+                                    with open(cluster_file_path, "r", encoding="utf-8") as cf:
+                                        c_data = json.load(cf)
+                                    coords = c_data.get("embeddings", [])
+                                    labels = c_data.get("labels", [])
+                                    texts = c_data.get("texts", [])
+                                    if coords:
+                                        df_c = pd.DataFrame({
+                                            "PCA1": [c[0] for c in coords],
+                                            "PCA2": [c[1] for c in coords],
+                                            "Speaker": [str(lbl) for lbl in labels]
+                                        })
+                                        fig = px.scatter(df_c, x="PCA1", y="PCA2", color="Speaker", title=f"{m_name} Clustering")
+                                        fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
+                                        chart_p = safe_save_chart(fig, os.path.join(out_dir, f"comp_chart_{m_name}.png"))
+                                except Exception:
+                                    pass
+                            
+                            any_dia = any([c.get("speaker") is not None and c.get("speaker") != "STT-Only" for c in chunks_data])
+                            
+                            hist_results[m_name] = {
+                                "stats": {
+                                    "processing_time_sec": proc_time,
+                                    "model": m_name,
+                                    "language": "auto",
+                                    "diarization_enabled": any_dia
+                                },
+                                "chunks_data": chunks_data,
+                                "chart_image_path": chart_p,
+                                "full_text": " ".join([c.get("text", "") for c in chunks_data])
+                            }
+                            
+                        r_path = create_comparison_report(audio_p_fallback, out_dir, hist_results, task_id="Comparison_History")
+                        st.session_state["compare_report_path"] = r_path
+                        st.session_state["compare_report_source"] = "history"
+                        st.rerun()
+                
+                # Render the history comparative report download button immediately in-place
+                if st.session_state.get("compare_report_source") == "history" and "compare_report_path" in st.session_state and os.path.exists(st.session_state["compare_report_path"]):
+                    with open(st.session_state["compare_report_path"], "rb") as f:
+                        hist_file_data = f.read()
+                    st.download_button(
+                        label="⬇️ 과거 비교 리포트 다운로드 (DOCX)",
+                        data=hist_file_data,
+                        file_name=os.path.basename(st.session_state["compare_report_path"]),
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key="download_hist_compare_docx",
+                        type="primary",
+                        use_container_width=True
+                    )
+            else:
+                st.info("과거 다중 모델 비교 분석 기록이 존재하지 않습니다.")
+        except Exception as e_hist:
+            st.error(f"과거 비교 기록 스캔 중 오류 발생: {e_hist}")
     
     # --- TAB 3: YOUTUBE DOWNLOADER ---
     with tab_youtube:
@@ -1036,12 +1222,13 @@ def main():
                                 
                         if "explorer_report_path" in st.session_state and os.path.exists(st.session_state["explorer_report_path"]):
                             with open(st.session_state["explorer_report_path"], "rb") as f:
-                                st.download_button(
-                                    label="⬇️ 리포트 다운로드 (DOCX)", data=f, 
-                                    file_name=os.path.basename(st.session_state["explorer_report_path"]), 
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key="download_explorer_docx"
-                                )
+                                explorer_file_data = f.read()
+                            st.download_button(
+                                label="⬇️ 리포트 다운로드 (DOCX)", data=explorer_file_data, 
+                                file_name=os.path.basename(st.session_state["explorer_report_path"]), 
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="download_explorer_docx"
+                            )
                     else: # chunk data file
                         df = pd.DataFrame(data)
                         st.dataframe(df, use_container_width=True)
@@ -1114,12 +1301,13 @@ def main():
                                 
                         if "explorer_report_path" in st.session_state and os.path.exists(st.session_state["explorer_report_path"]):
                             with open(st.session_state["explorer_report_path"], "rb") as rf:
-                                st.download_button(
-                                    label="⬇️ 리포트 다운로드 (DOCX)", data=rf,
-                                    file_name=os.path.basename(st.session_state["explorer_report_path"]),
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key="download_explorer_chunk_docx"
-                                )
+                                explorer_chunk_file_data = rf.read()
+                            st.download_button(
+                                label="⬇️ 리포트 다운로드 (DOCX)", data=explorer_chunk_file_data,
+                                file_name=os.path.basename(st.session_state["explorer_report_path"]),
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="download_explorer_chunk_docx"
+                            )
                 elif selected.endswith(".csv"):
                     df = pd.read_csv(selected)
                     st.dataframe(df, use_container_width=True)
