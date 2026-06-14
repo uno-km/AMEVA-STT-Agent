@@ -1,6 +1,9 @@
 import streamlit as st
 import os
 import time
+
+# Ensure ffmpeg/ffprobe directory is prepended to system PATH inside Python process
+os.environ["PATH"] = r"C:\ffmpeg\bin;" + os.environ.get("PATH", "")
 import pandas as pd
 import json
 import plotly.express as px
