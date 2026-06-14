@@ -180,7 +180,7 @@ try:
     print('Success')
 except ValueError:
     try:
-        model = WhisperModel('tiny', device='cuda', compute_type='int8_float16')
+        model = WhisperModel('tiny', device='cuda', compute_type='int8')
         print('Success')
     except Exception:
         print('Failed')

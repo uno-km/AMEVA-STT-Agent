@@ -111,17 +111,17 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
             )
         except ValueError as e:
             if device == "cuda" and "compute type" in str(e).lower():
-                output_queue.put(("system", "⚠️ GPU가 float16 고속 연산을 지원하지 않아 int8_float16 모드로 전환합니다."))
+                output_queue.put(("system", "⚠️ GPU가 float16 고속 연산을 지원하지 않아 int8 모드로 전환합니다."))
                 try:
                     model = WhisperModel(
                         model_name,
                         device=device,
-                        compute_type="int8_float16",
+                        compute_type="int8",
                         cpu_threads=threads,
                         download_root=model_dir
                     )
                 except Exception:
-                    output_queue.put(("system", "⚠️ int8_float16 로드 실패. float32 모드로 최종 시도합니다."))
+                    output_queue.put(("system", "⚠️ int8 로드 실패. float32 모드로 최종 시도합니다."))
                     model = WhisperModel(
                         model_name,
                         device=device,
