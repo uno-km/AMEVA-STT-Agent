@@ -52,6 +52,21 @@ def worker_stt(audio_path, model_size, language, threads, output_queue, config=N
 
     output_queue.put(("log", f"[STT Worker] GGML 엔진 시작: 모델({model_size}), 언어({language})"))
     start = time.time()
+
+    # GPU 가속 상태 진단 및 VRAM 경고
+    try:
+        import torch
+        cuda_avail = torch.cuda.is_available()
+        if cuda_avail:
+            device_name = torch.cuda.get_device_name(0)
+            total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            output_queue.put(("system", f"🟢 GPU 가속 활성화: {device_name} (VRAM: {total_vram:.1f} GB)"))
+            if model_size in ["large", "turbo"] and total_vram < 8.0:
+                output_queue.put(("system", f"⚠️ 경고: '{model_size}' 모델은 약 6~8GB VRAM을 요구합니다. 현재 VRAM({total_vram:.1f}GB)이 부족할 수 있습니다. 속도 저하 또는 OOM이 발생하는 경우 small 또는 medium 모델 사용을 권장합니다."))
+        else:
+            output_queue.put(("system", "🟡 CPU 전용 모드로 동작 중 (CUDA 미적용)"))
+    except Exception as e:
+        output_queue.put(("system", f"🟡 하드웨어 가속 진단 실패: {str(e)} (CPU 모드로 구동)"))
     
     def format_ts(seconds):
         ms = int((seconds % 1) * 1000)
@@ -273,6 +288,17 @@ class STTPipeline:
         language = stt_config.get("language", "ko")
         threads = int(stt_config.get("threads", 4))
         num_speakers = stt_config.get("speakers", 2)
+
+        # GPU 가용 여부 사전 검사
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_info = f"🟢 GPU 가속 가능: {torch.cuda.get_device_name(0)}"
+            else:
+                gpu_info = "🟡 CPU Mode (GPU 가속 미활성)"
+        except:
+            gpu_info = "🟡 CPU Mode (진단 라이브러리 누락)"
+        log(f"[Pipeline] {gpu_info} | 대상 모델: {model_size} | 언어: {language}")
 
         manager = multiprocessing.Manager()
         q = manager.Queue()

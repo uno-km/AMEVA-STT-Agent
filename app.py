@@ -56,15 +56,80 @@ def main():
         root.destroy()
         return file_path
     
+    # YouTube Helper Functions
+    def fetch_youtube_channel_videos(url, max_results=30):
+        import yt_dlp
+        ydl_opts = {
+            'extract_flat': 'in_playlist',
+            'playlistend': max_results,
+            'quiet': True,
+            'skip_download': True
+        }
+        videos = []
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                if 'entries' in info:
+                    for entry in info['entries']:
+                        if entry:
+                            duration = entry.get('duration')
+                            duration_str = f"{int(duration // 60):02d}:{int(duration % 60):02d}" if duration else "Unknown"
+                            videos.append({
+                                'id': entry.get('id'),
+                                'title': entry.get('title', 'No Title'),
+                                'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
+                                'duration_str': duration_str
+                            })
+            except Exception as e:
+                st.error(f"유튜브 채널 정보를 가져오는 데 실패했습니다: {e}")
+        return videos
+
     # State initialization for UI fields
     if "ui_custom_model" not in st.session_state: st.session_state["ui_custom_model"] = stt_settings.get("custom_model_path", "")
     if "ui_input_dir" not in st.session_state: st.session_state["ui_input_dir"] = batch_settings.get("input_dir", r"C:\ameva\input")
     if "ui_output_dir" not in st.session_state: st.session_state["ui_output_dir"] = batch_settings.get("output_dir", r"C:\ameva\output")
-    if "ui_models_dir" not in st.session_state: st.session_state["ui_models_dir"] = settings_manager.get("models_dir", r"C:\ameva\models\stt")
+    if "yt_channel_url" not in st.session_state: st.session_state["yt_channel_url"] = ""
+    if "yt_videos" not in st.session_state: st.session_state["yt_videos"] = []
+    if "yt_download_dir" not in st.session_state: st.session_state["yt_download_dir"] = batch_settings.get("input_dir", r"C:\ameva\input")
+    if "yt_selected_videos" not in st.session_state: st.session_state["yt_selected_videos"] = []
+    val = settings_manager.get("models_dir")
+    if "ui_models_dir" not in st.session_state: st.session_state["ui_models_dir"] = val if val and isinstance(val, str) else r"C:\ameva\models\stt"
     if "ui_manual_path" not in st.session_state: st.session_state["ui_manual_path"] = ""
     if "ui_comp_path" not in st.session_state: st.session_state["ui_comp_path"] = ""
     
     # --- SIDEBAR: ADVANCED SETTINGS ---
+    st.sidebar.header("🖥️ 하드웨어 가속 현황")
+    
+    # 런타임 하드웨어 가속 현황 진단
+    gpu_status = "CPU Mode (비가속)"
+    gpu_color = "#FFA500" # Orange
+    gpu_details = ""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu_status = "GPU Acceleration (CUDA Active)"
+            gpu_color = "#4CAF50" # Green
+            gpu_details = f"Device: {torch.cuda.get_device_name(0)}"
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            gpu_details += f"\nVRAM: {vram_gb:.1f} GB"
+        else:
+            env_acc = os.environ.get("AMEVA_GPU_ACCELERATED", "False")
+            if env_acc == "True":
+                gpu_status = "GPU detected but CUDA binding failed"
+                gpu_color = "#FF3333" # Red
+                gpu_details = "Check PyTorch / CUDA toolkit compatibility."
+    except Exception as e:
+        gpu_status = "Hardware Diagnosis Error"
+        gpu_color = "#FF3333" # Red
+        gpu_details = str(e)
+        
+    st.sidebar.markdown(f"""
+    <div style="padding: 10px; border-radius: 8px; background-color: #1E1E1E; border: 1px solid #333; margin-bottom: 15px;">
+        <div style="font-size: 14px; font-weight: bold; color: {gpu_color};">● {gpu_status}</div>
+        <div style="font-size: 12px; color: #AAA; white-space: pre-wrap; margin-top: 5px;">{gpu_details}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.sidebar.header("⚙️ 시스템 고급 설정")
     
     st.sidebar.subheader("1. 모델 구성")
@@ -72,8 +137,20 @@ def main():
     idx = models.index(stt_settings.get("model", "medium")) if stt_settings.get("model", "medium") in models else 2
     model_size = st.sidebar.selectbox("Whisper 모델 사이즈", models, index=idx)
     
+    # VRAM 경고 메시지 동적 표시
+    try:
+        import torch
+        if torch.cuda.is_available():
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if model_size in ["large", "large-v3-turbo"] and vram_gb < 8.0:
+                st.sidebar.warning(f"⚠️ 현재 GPU VRAM({vram_gb:.1f}GB)이 대형 모델 실행에 아슬아슬할 수 있습니다. OOM 방지를 위해 medium 이하를 권장합니다.")
+    except:
+        pass
+    
     # Model Status & Download Logic
-    model_dir = settings_manager.get("models_dir", r"C:\ameva\models\stt")
+    model_dir = settings_manager.get("models_dir")
+    if not isinstance(model_dir, str) or not model_dir:
+        model_dir = r"C:\ameva\models\stt"
     base_filename = f"ggml-{model_size}"
     if model_size == "large-v3-turbo": base_filename = "ggml-large-v3-turbo"
     elif model_size == "large": base_filename = "ggml-large-v3"
@@ -189,9 +266,10 @@ def main():
         st.sidebar.success("설정이 저장되었습니다.")
     
     # TABS
-    tab_run, tab_compare, tab_explorer, tab_db = st.tabs([
+    tab_run, tab_compare, tab_youtube, tab_explorer, tab_db = st.tabs([
         "▶️ 작업 실행 (Batch & Auto)", 
         "⚖️ 모델 성능 비교", 
+        "📥 유튜브 다운로더",
         "📁 데이터 및 결과 탐색기",
         "📊 데이터베이스 및 시스템 로그"
     ])
@@ -619,8 +697,171 @@ def main():
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                 )
     
+    # --- TAB 3: YOUTUBE DOWNLOADER ---
+    with tab_youtube:
+        st.header("📥 유튜브 오디오 다운로드 센터")
+        st.markdown("유튜브 단일 영상 또는 채널/플레이리스트의 영상 목록을 긁어와 오디오(.mp3)를 추출하고 저장 폴더를 지정하여 일괄 다운로드합니다.")
+        
+        # 저장 디렉토리 선택 영역
+        st.subheader("📁 1. 저장될 폴더 선택")
+        col_dir1, col_dir2 = st.columns([6, 1])
+        with col_dir1:
+            yt_download_dir = st.text_input("저장 경로", value=st.session_state.get("yt_download_dir", r"C:\ameva\input"), key="yt_download_dir_input")
+        with col_dir2:
+            if st.button("📁 폴더 선택", key="btn_yt_dir"):
+                d = ask_directory()
+                if d:
+                    st.session_state["yt_download_dir"] = d
+                    st.rerun()
+        
+        st.markdown("---")
+        
+        # 다운로드 모드 선택
+        yt_mode = st.radio("다운로드 모드 선택", ["단일 영상 다운로드", "채널/플레이리스트 일괄 다운로드"], horizontal=True)
+        
+        if yt_mode == "단일 영상 다운로드":
+            st.subheader("🔗 단일 영상 다운로드")
+            single_url = st.text_input("YouTube 영상 링크 입력", placeholder="https://www.youtube.com/watch?v=...")
+            
+            if st.button("오디오 다운로드 시작 🚀", type="primary", use_container_width=True):
+                if not single_url.strip():
+                    st.warning("다운로드할 유튜브 링크를 입력하세요.")
+                else:
+                    target_dir = st.session_state.get("yt_download_dir", r"C:\ameva\input")
+                    os.makedirs(target_dir, exist_ok=True)
+                    with st.spinner("유튜브 오디오를 다운로드 및 변환하고 있습니다..."):
+                        import yt_dlp
+                        out_tmpl = os.path.join(target_dir, "%(title)s.%(ext)s")
+                        ydl_opts = {
+                            'format': 'bestaudio/best',
+                            'postprocessors': [{
+                                'key': 'FFmpegExtractAudio',
+                                'preferredcodec': 'mp3',
+                                'preferredquality': '192',
+                            }],
+                            'outtmpl': out_tmpl,
+                            'quiet': True
+                        }
+                        try:
+                            start_t = time.time()
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                info = ydl.extract_info(single_url.strip(), download=True)
+                                dl_filename = ydl.prepare_filename(info)
+                                mp3_filename = os.path.splitext(dl_filename)[0] + ".mp3"
+                                proc_time = time.time() - start_t
+                            
+                            # DB Log (기록 저장)
+                            from src.db.db_manager import log_batch
+                            log_batch("YOUTUBE_SINGLE_DOWNLOAD", single_url.strip(), "yt-dlp", "auto", proc_time, f"SUCCESS: {os.path.basename(mp3_filename)}")
+                            
+                            st.success(f"🎉 다운로드 완료!\n저장 위치: {mp3_filename}")
+                            st.audio(mp3_filename)
+                        except Exception as e:
+                            st.error(f"다운로드 실패: {e}")
+                            from src.db.db_manager import log_error
+                            log_error("YouTube Single Downloader", str(e))
+                            
+        else:
+            st.subheader("📺 채널 / 플레이리스트 일괄 다운로드")
+            col_ch1, col_ch2 = st.columns([5, 2])
+            with col_ch1:
+                channel_url = st.text_input("YouTube 채널 혹은 플레이리스트 링크 입력", placeholder="https://www.youtube.com/@channel_name 또는 https://www.youtube.com/playlist?list=...")
+            with col_ch2:
+                max_vids = st.number_input("최대 조회 영상 개수", min_value=1, max_value=100, value=30)
+                
+            if st.button("영상 목록 불러오기 🔍", use_container_width=True):
+                if not channel_url.strip():
+                    st.warning("유튜브 채널 또는 플레이리스트 링크를 입력해주세요.")
+                else:
+                    with st.spinner("채널 영상 목록을 긁어오는 중..."):
+                        vids = fetch_youtube_channel_videos(channel_url.strip(), max_vids)
+                        if vids:
+                            st.session_state["yt_videos"] = vids
+                            st.toast(f"총 {len(vids)}개의 영상을 불러왔습니다!", icon="✅")
+                            st.rerun()
+                        else:
+                            st.error("영상 목록을 가져오지 못했습니다. 링크를 확인해주세요.")
+            
+            if st.session_state.get("yt_videos"):
+                st.markdown("### 📋 영상 선택 리스트")
+                
+                # 전체 선택 / 해제 버튼
+                col_sel1, col_sel2 = st.columns(2)
+                with col_sel1:
+                    if st.button("전체 선택 Check All"):
+                        st.session_state["yt_selected_videos"] = [v['url'] for v in st.session_state["yt_videos"]]
+                        st.rerun()
+                with col_sel2:
+                    if st.button("전체 해제 Uncheck All"):
+                        st.session_state["yt_selected_videos"] = []
+                        st.rerun()
+                
+                # 영상 멀티 선택기
+                video_options = {v['url']: f"{v['title']} ({v['duration_str']})" for v in st.session_state["yt_videos"]}
+                selected_urls = st.multiselect(
+                    "다운로드할 영상을 선택하세요 (목록에서 클릭하여 추가/삭제 가능)",
+                    options=list(video_options.keys()),
+                    default=st.session_state.get("yt_selected_videos", []),
+                    format_func=lambda x: video_options[x]
+                )
+                st.session_state["yt_selected_videos"] = selected_urls
+                
+                st.info(f"선택된 영상 개수: {len(selected_urls)}개")
+                
+                if st.button("선택한 영상 일괄 다운로드 시작 📥", type="primary", use_container_width=True):
+                    if not selected_urls:
+                        st.warning("다운로드할 영상을 최소 하나 이상 선택하세요.")
+                    else:
+                        target_dir = st.session_state.get("yt_download_dir", r"C:\ameva\input")
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        progress_bar = st.progress(0.0)
+                        status_text = st.empty()
+                        log_area = st.empty()
+                        logs = []
+                        
+                        success_count = 0
+                        for idx, v_url in enumerate(selected_urls):
+                            v_title = video_options[v_url]
+                            status_text.markdown(f"**진행 상황: ({idx+1}/{len(selected_urls)})** 다운로드 중...\n`{v_title}`")
+                            
+                            out_tmpl = os.path.join(target_dir, "%(title)s.%(ext)s")
+                            ydl_opts = {
+                                'format': 'bestaudio/best',
+                                'postprocessors': [{
+                                    'key': 'FFmpegExtractAudio',
+                                    'preferredcodec': 'mp3',
+                                    'preferredquality': '192',
+                                }],
+                                'outtmpl': out_tmpl,
+                                'quiet': True
+                            }
+                            
+                            try:
+                                start_t = time.time()
+                                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                    info = ydl.extract_info(v_url, download=True)
+                                    dl_filename = ydl.prepare_filename(info)
+                                    mp3_filename = os.path.splitext(dl_filename)[0] + ".mp3"
+                                    proc_time = time.time() - start_t
+                                
+                                # DB Log
+                                from src.db.db_manager import log_batch
+                                log_batch("YOUTUBE_BATCH_DOWNLOAD", v_url, "yt-dlp", "auto", proc_time, f"SUCCESS: {os.path.basename(mp3_filename)}")
+                                
+                                success_count += 1
+                                logs.append(f"✅ 성공 ({idx+1}/{len(selected_urls)}): {os.path.basename(mp3_filename)}")
+                            except Exception as e:
+                                logs.append(f"❌ 실패 ({idx+1}/{len(selected_urls)}): {v_title[:30]}... ({e})")
+                                from src.db.db_manager import log_error
+                                log_error("YouTube Batch Downloader", f"URL: {v_url} | Error: {e}")
+                                
+                            progress_bar.progress((idx + 1) / len(selected_urls))
+                            log_area.code("\n".join(logs))
+                            
+                        status_text.markdown(f"### 🎉 일괄 다운로드 완료 (성공 {success_count} / 총 {len(selected_urls)}개)")
     
-    # --- TAB 3: EXPLORER & REPORT ---
+    # --- TAB 4: EXPLORER & REPORT ---
     with tab_explorer:
         st.header("📁 로컬 파일 탐색기 & 개별 결과 리포트")
         
