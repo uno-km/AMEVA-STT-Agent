@@ -6,9 +6,9 @@ echo        AMEVA STT Enterprise Initialization Script
 echo ========================================================
 echo.
 
-:: 0. Clean port 8501 if listening
-echo [*] Cleaning existing Streamlit process on port 8501...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8501 ^| findstr LISTENING') do (
+:: 0. Clean port 8500 if listening
+echo [*] Cleaning existing Streamlit process on port 8500...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8500 ^| findstr LISTENING') do (
     taskkill /f /pid %%a >nul 2>&1
 )
 
@@ -24,7 +24,7 @@ echo [OK] Python detected.
 
 :: 2. Setup Venv
 if not exist ".venv" (
-    echo [*] Creating virtual environment (.venv)...
+    echo [*] Creating virtual environment - .venv...
     python -m venv .venv
 )
 echo [OK] Virtual environment checked.
@@ -50,6 +50,6 @@ if not exist "C:\ameva\AMEVA-STT-Agent\db" mkdir "C:\ameva\AMEVA-STT-Agent\db"
 echo ========================================================
 echo    🚀 Launching AMEVA STT Enterprise Dashboard...
 echo ========================================================
-streamlit run app.py
+streamlit run app.py --server.port 8500
 
 pause

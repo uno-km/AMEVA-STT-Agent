@@ -5,14 +5,14 @@ Write-Host "       AMEVA STT Enterprise Initialization Script" -ForegroundColor 
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 0. Clean port 8501
-Write-Host "[*] Checking and cleaning port 8501..." -ForegroundColor Yellow
-$proc = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue
+# 0. Clean port 8500
+Write-Host "[*] Checking and cleaning port 8500..." -ForegroundColor Yellow
+$proc = Get-NetTCPConnection -LocalPort 8500 -State Listen -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[*] Killing existing process holding port 8501 (PID: $($proc.OwningProcess))..." -ForegroundColor DarkYellow
+    Write-Host "[*] Killing existing process holding port 8500 (PID: $($proc.OwningProcess))..." -ForegroundColor DarkYellow
     Stop-Process -Id $proc.OwningProcess -Force -ErrorAction SilentlyContinue
 }
-Write-Host "[OK] Port 8501 is clean." -ForegroundColor Green
+Write-Host "[OK] Port 8500 is clean." -ForegroundColor Green
 
 # 0-1. ffmpeg 자율 설치 및 바인딩
 $ffmpegPath = "C:\ffmpeg\bin"
@@ -229,5 +229,5 @@ Write-Host "========================================================" -Foregroun
 $env:AMEVA_GPU_ACCELERATED = "$gpuAccelerated"
 $env:AMEVA_GPU_NAME = "$gpuName"
 
-streamlit run app.py
+streamlit run app.py --server.port 8500
 

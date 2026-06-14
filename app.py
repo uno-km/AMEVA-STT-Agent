@@ -400,6 +400,34 @@ def main():
                                 st.session_state["last_text"] = full_text
                                 st.session_state["last_audio"] = t
                                 st.session_state["last_chunks"] = chunks_data
+
+                                # Word Report Auto-Generation
+                                chart_path = None
+                                clustering_data = None
+                                if stt_settings.get("diarization_enabled", True) and len(pca_coords) > 0:
+                                    try:
+                                        df_cluster = pd.DataFrame({
+                                            "PCA1": [c[0] for c in pca_coords],
+                                            "PCA2": [c[1] for c in pca_coords],
+                                            "Speaker": [f"Speaker {lbl}" for lbl in labels],
+                                            "Text": dia_texts
+                                        })
+                                        fig = px.scatter(df_cluster, x="PCA1", y="PCA2", color="Speaker", hover_data=["Text"], title="Speaker Clustering")
+                                        fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
+                                        chart_path = safe_save_chart(fig, os.path.join(out_dir, f"{os.path.splitext(os.path.basename(t))[0]}_chart.png"))
+                                        clustering_data = {
+                                            "coords": pca_coords.tolist(),
+                                            "labels": labels,
+                                            "texts": dia_texts
+                                        }
+                                    except Exception as err_c:
+                                        log_callback(f"[Report] 시각화 생성 실패: {err_c}")
+                                
+                                try:
+                                    report_path = create_stt_report(t, out_dir, st.session_state["last_stats"], chunks_data, chart_path, task_id="MANUAL_BATCH", clustering_data=clustering_data)
+                                    log_callback(f"[Report] Word 보고서 자동 생성 완료: {os.path.basename(report_path)}")
+                                except Exception as err_r:
+                                    log_callback(f"[Report] Word 보고서 생성 실패: {err_r}")
                                 
                             st.success("✅ 수동 작업이 모두 완료되었습니다.")
                         except Exception as e:
@@ -436,6 +464,40 @@ def main():
                                         
                                         batch_id = log_batch("AUTO", p, stt_settings.get("model", ""), stt_settings.get("language", "auto"), proc_time, "SUCCESS")
                                         log_transcriptions(batch_id, chunks_data)
+
+                                        # Word Report Auto-Generation
+                                        stats = {
+                                            "processing_time_sec": proc_time,
+                                            "model": stt_settings.get("model", ""),
+                                            "language": stt_settings.get("language", "auto"),
+                                            "diarization_enabled": stt_settings.get("diarization_enabled", True)
+                                        }
+                                        chart_path = None
+                                        clustering_data = None
+                                        if stats["diarization_enabled"] and len(pca_coords) > 0:
+                                            try:
+                                                df_cluster = pd.DataFrame({
+                                                    "PCA1": [c[0] for c in pca_coords],
+                                                    "PCA2": [c[1] for c in pca_coords],
+                                                    "Speaker": [f"Speaker {lbl}" for lbl in labels],
+                                                    "Text": dia_texts
+                                                })
+                                                fig = px.scatter(df_cluster, x="PCA1", y="PCA2", color="Speaker", hover_data=["Text"], title="Speaker Clustering")
+                                                fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
+                                                chart_path = safe_save_chart(fig, os.path.join(out_dir, f"{os.path.splitext(os.path.basename(p))[0]}_chart.png"))
+                                                clustering_data = {
+                                                    "coords": pca_coords.tolist(),
+                                                    "labels": labels,
+                                                    "texts": dia_texts
+                                                }
+                                            except Exception as err_c:
+                                                log_callback(f"[Report] 시각화 생성 실패: {err_c}")
+                                        
+                                        try:
+                                            report_path = create_stt_report(p, out_dir, stats, chunks_data, chart_path, task_id="AUTO", clustering_data=clustering_data)
+                                            log_callback(f"[Report] Word 보고서 자동 생성 완료: {os.path.basename(report_path)}")
+                                        except Exception as err_r:
+                                            log_callback(f"[Report] Word 보고서 생성 실패: {err_r}")
                                         
                                         os.rename(p, p + ".done")
                                     except Exception as auto_e:
@@ -622,7 +684,8 @@ def main():
                                             "Speaker": [str(lbl) for lbl in c_data.get("labels", [])]
                                         })
                                         fig = px.scatter(df_c, x="PCA1", y="PCA2", color="Speaker", title=f"Sample Clustering")
-                                        chart_p = safe_save_chart(fig, os.path.join(out_dir, f"comp_chart_sample.png"))
+                                        fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
+                                        chart_p = safe_save_chart(fig, os.path.join(out_dir, f"comp_chart_{os.path.basename(m) if os.path.isabs(m) else m}.png"))
                             
                             st.session_state["comp_results"][m] = {
                                 "stats": {
@@ -905,6 +968,7 @@ def main():
                             "Speaker": [f"Speaker {lbl}" for lbl in labels], "Text": texts
                         })
                         fig = px.scatter(df_cluster, x="PCA1", y="PCA2", color="Speaker", hover_data=["Text"], title="Speaker Clustering")
+                        fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
                         st.plotly_chart(fig, use_container_width=True)
                         
                         if st.button("📝 이 파일의 엔터프라이즈 Word 리포트 생성", type="primary"):
@@ -914,7 +978,25 @@ def main():
                                 chunks_data = st.session_state.get("last_chunks", [])
                                 audio = st.session_state.get("last_audio", selected)
                                 
-                                report_path = create_stt_report(audio, base_path, stats, chunks_data, chart_path, task_id="Explorer")
+                                # Fallback chunk JSON loading if last_chunks is missing
+                                base_name = os.path.splitext(os.path.basename(selected))[0]
+                                if base_name.endswith("_clusters"):
+                                    base_name = base_name[:-9]
+                                chunk_json_fallback = os.path.join(base_path, f"{base_name}.json")
+                                if not chunks_data and os.path.exists(chunk_json_fallback):
+                                    try:
+                                        with open(chunk_json_fallback, "r", encoding="utf-8") as jf:
+                                            chunks_data = json.load(jf)
+                                    except Exception:
+                                        pass
+                                
+                                stats["diarization_enabled"] = True
+                                clustering_data = {
+                                    "coords": coords,
+                                    "labels": labels,
+                                    "texts": texts
+                                }
+                                report_path = create_stt_report(audio, base_path, stats, chunks_data, chart_path, task_id="Explorer", clustering_data=clustering_data)
                                 
                                 with open(report_path, "rb") as f:
                                     st.download_button(
@@ -925,6 +1007,77 @@ def main():
                     else: # chunk data file
                         df = pd.DataFrame(data)
                         st.dataframe(df, use_container_width=True)
+                        
+                        # Find cluster file helper
+                        def find_cluster_file(chunk_json_path):
+                            base_name = os.path.splitext(os.path.basename(chunk_json_path))[0]
+                            db_root = r"c:\ameva\AMEVA-STT-Agent\db\clusters"
+                            if not os.path.exists(db_root):
+                                return None
+                            for root_d, _, files_d in os.walk(db_root):
+                                for f_d in files_d:
+                                    if f_d == f"{base_name}_clusters.json":
+                                        return os.path.join(root_d, f_d)
+                            return None
+                            
+                        cluster_file = find_cluster_file(selected)
+                        
+                        if st.button("📝 이 파일의 엔터프라이즈 Word 리포트 생성", key="btn_chunk_report", type="primary"):
+                            with st.spinner("리포트를 생성 중입니다..."):
+                                audio_name = os.path.splitext(os.path.basename(selected))[0]
+                                audio_path_fallback = os.path.join(batch_settings.get("input_dir", r"C:\ameva\input"), f"{audio_name}.wav")
+                                if not os.path.exists(audio_path_fallback):
+                                    audio_path_fallback = selected # Fallback to json path if audio doesn't exist
+                                
+                                stats = {
+                                    "processing_time_sec": 0.0,
+                                    "model": "Unknown",
+                                    "language": "auto",
+                                    "diarization_enabled": cluster_file is not None
+                                }
+                                
+                                chart_path = None
+                                clustering_data = None
+                                
+                                if cluster_file and os.path.exists(cluster_file):
+                                    try:
+                                        with open(cluster_file, "r", encoding="utf-8") as cf:
+                                            c_data = json.load(cf)
+                                        coords = c_data.get("embeddings", [])
+                                        labels = c_data.get("labels", [])
+                                        texts = c_data.get("texts", [])
+                                        
+                                        df_cluster = pd.DataFrame({
+                                            "PCA1": [c[0] for c in coords], "PCA2": [c[1] for c in coords],
+                                            "Speaker": [f"Speaker {lbl}" for lbl in labels], "Text": texts
+                                        })
+                                        fig = px.scatter(df_cluster, x="PCA1", y="PCA2", color="Speaker", hover_data=["Text"], title="Speaker Clustering")
+                                        fig.update_layout(width=600, height=600, yaxis=dict(scaleanchor="x", scaleratio=1))
+                                        chart_path = safe_save_chart(fig, os.path.join(base_path, "temp_chart.png"))
+                                        clustering_data = {
+                                            "coords": coords,
+                                            "labels": labels,
+                                            "texts": texts
+                                        }
+                                    except Exception as err_c:
+                                        st.warning(f"시각화 분석 데이터를 로드하는 중 실패했습니다: {err_c}")
+                                
+                                report_path = create_stt_report(
+                                    audio_path=audio_path_fallback,
+                                    output_dir=base_path,
+                                    stats=stats,
+                                    chunks_data=data,
+                                    chart_image_path=chart_path,
+                                    task_id="Explorer",
+                                    clustering_data=clustering_data
+                                )
+                                
+                                with open(report_path, "rb") as rf:
+                                    st.download_button(
+                                        label="⬇️ 리포트 다운로드 (DOCX)", data=rf,
+                                        file_name=os.path.basename(report_path),
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                    )
                 elif selected.endswith(".csv"):
                     df = pd.read_csv(selected)
                     st.dataframe(df, use_container_width=True)
