@@ -592,6 +592,8 @@ def main():
                     st.success(f"경로를 복사하여 텍스트 상자에 붙여넣으세요:\n{d}")
         
         if st.button("비교 시작 🏁", type="primary"):
+            if "compare_report_path" in st.session_state:
+                del st.session_state["compare_report_path"]
             target_p = comp_audio_path.strip()
                 
             if not target_p or not os.path.exists(target_p):
@@ -730,21 +732,45 @@ def main():
                             base_m = valid_models[0]
                             base_chunks = st.session_state["comp_results"][base_m]["chunks_data"]
                             
+                            printed_chunks = {m: set() for m in valid_models}
+                            
                             comp_rows = []
                             for bc in base_chunks:
                                 t_s, t_e = bc.get("start", 0), bc.get("end", 0)
+                                time_label = f"[{int(t_s//60):02d}:{int(t_s%60):02d} ~ {int(t_e//60):02d}:{int(t_e%60):02d}]"
                                 row = {
-                                    "구간 (Time)": f"[{int(t_s//60):02d}:{int(t_s%60):02d} ~ {int(t_e//60):02d}:{int(t_e%60):02d}]"
+                                    "구간 (Time)": time_label
                                 }
-                                for m in valid_models:
+                                
+                                # Base model text
+                                base_m_name = os.path.basename(base_m) if os.path.isabs(base_m) else base_m
+                                row[base_m_name] = bc.get("text", "").strip()
+                                
+                                # Other models text
+                                for m in valid_models[1:]:
                                     m_name = os.path.basename(m) if os.path.isabs(m) else m
                                     m_chunks = st.session_state["comp_results"][m]["chunks_data"]
-                                    overlap_texts = []
-                                    for mc in m_chunks:
+                                    
+                                    best_match_idx = None
+                                    best_overlap = 0.0
+                                    
+                                    for mc_idx, mc in enumerate(m_chunks):
                                         mc_s, mc_e = mc.get("start", 0), mc.get("end", 0)
-                                        if mc_s < t_e and mc_e > t_s:
-                                            overlap_texts.append(mc.get("text", "").strip())
-                                    row[m_name] = " ".join(overlap_texts)
+                                        overlap_start = max(t_s, mc_s)
+                                        overlap_end = min(t_e, mc_e)
+                                        overlap = max(0.0, overlap_end - overlap_start)
+                                        if overlap > best_overlap:
+                                            best_overlap = overlap
+                                            best_match_idx = mc_idx
+                                            
+                                    if best_match_idx is not None:
+                                        if best_match_idx in printed_chunks[m]:
+                                            row[m_name] = "(이미 위에 포함됨)"
+                                        else:
+                                            row[m_name] = m_chunks[best_match_idx].get("text", "").strip()
+                                            printed_chunks[m].add(best_match_idx)
+                                    else:
+                                        row[m_name] = ""
                                 comp_rows.append(row)
                                 
                             if comp_rows:
@@ -757,12 +783,17 @@ def main():
                         with st.spinner("비교 리포트를 생성하고 있습니다..."):
                             audio_p = st.session_state["comp_targets"][0] if st.session_state["comp_targets"] else "Multiple_Files"
                             r_path = create_comparison_report(audio_p, out_dir, st.session_state["comp_results"], task_id="Comparison")
-                            with open(r_path, "rb") as f:
-                                st.download_button(
-                                    label="⬇️ 비교 리포트 다운로드 (DOCX)", data=f, 
-                                    file_name=os.path.basename(r_path), 
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                )
+                            st.session_state["compare_report_path"] = r_path
+                            st.rerun()
+                            
+                    if "compare_report_path" in st.session_state and os.path.exists(st.session_state["compare_report_path"]):
+                        with open(st.session_state["compare_report_path"], "rb") as f:
+                            st.download_button(
+                                label="⬇️ 비교 리포트 다운로드 (DOCX)", data=f, 
+                                file_name=os.path.basename(st.session_state["compare_report_path"]), 
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="download_compare_docx"
+                            )
     
     # --- TAB 3: YOUTUBE DOWNLOADER ---
     with tab_youtube:
@@ -946,6 +977,9 @@ def main():
                         else:
                             if st.button(f"📄 {item}", key=full_p):
                                 st.session_state["selected_file"] = full_p
+                                if "explorer_report_path" in st.session_state:
+                                    del st.session_state["explorer_report_path"]
+                                st.rerun()
                 build_tree(base_path)
             else:
                 st.warning("출력 디렉터리가 아직 존재하지 않습니다.")
@@ -997,13 +1031,17 @@ def main():
                                     "texts": texts
                                 }
                                 report_path = create_stt_report(audio, base_path, stats, chunks_data, chart_path, task_id="Explorer", clustering_data=clustering_data)
+                                st.session_state["explorer_report_path"] = report_path
+                                st.rerun()
                                 
-                                with open(report_path, "rb") as f:
-                                    st.download_button(
-                                        label="⬇️ 리포트 다운로드 (DOCX)", data=f, 
-                                        file_name=os.path.basename(report_path), 
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                    )
+                        if "explorer_report_path" in st.session_state and os.path.exists(st.session_state["explorer_report_path"]):
+                            with open(st.session_state["explorer_report_path"], "rb") as f:
+                                st.download_button(
+                                    label="⬇️ 리포트 다운로드 (DOCX)", data=f, 
+                                    file_name=os.path.basename(st.session_state["explorer_report_path"]), 
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key="download_explorer_docx"
+                                )
                     else: # chunk data file
                         df = pd.DataFrame(data)
                         st.dataframe(df, use_container_width=True)
@@ -1071,13 +1109,17 @@ def main():
                                     task_id="Explorer",
                                     clustering_data=clustering_data
                                 )
+                                st.session_state["explorer_report_path"] = report_path
+                                st.rerun()
                                 
-                                with open(report_path, "rb") as rf:
-                                    st.download_button(
-                                        label="⬇️ 리포트 다운로드 (DOCX)", data=rf,
-                                        file_name=os.path.basename(report_path),
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                    )
+                        if "explorer_report_path" in st.session_state and os.path.exists(st.session_state["explorer_report_path"]):
+                            with open(st.session_state["explorer_report_path"], "rb") as rf:
+                                st.download_button(
+                                    label="⬇️ 리포트 다운로드 (DOCX)", data=rf,
+                                    file_name=os.path.basename(st.session_state["explorer_report_path"]),
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key="download_explorer_chunk_docx"
+                                )
                 elif selected.endswith(".csv"):
                     df = pd.read_csv(selected)
                     st.dataframe(df, use_container_width=True)

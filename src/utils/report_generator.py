@@ -423,6 +423,9 @@ def create_comparison_report(audio_path, output_dir, models_data, task_id="Compa
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             for r in p.runs: apply_text_styling(r, size_pt=9, bold=True, color_rgb=RGBColor(255,255,255))
             
+        # Keep track of printed/matched chunks to avoid double matching
+        printed_chunks = {m: set() for m in valid_models}
+        
         for bc in base_chunks:
             t_s, t_e = bc.get("start", 0), bc.get("end", 0)
             time_label = f"[{int(t_s//60):02d}:{int(t_s%60):02d} ~ {int(t_e//60):02d}:{int(t_e%60):02d}]"
@@ -433,16 +436,34 @@ def create_comparison_report(audio_path, output_dir, models_data, task_id="Compa
             p_time.alignment = WD_ALIGN_PARAGRAPH.CENTER
             for r in p_time.runs: apply_text_styling(r, size_pt=8)
             
-            for idx, m_name in enumerate(valid_models):
+            # Base model text
+            row_cells[1].text = bc.get("text", "").strip()
+            for r in row_cells[1].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
+            
+            # Other models text
+            for idx, m_name in enumerate(valid_models[1:]):
                 m_chunks = models_data[m_name].get('chunks_data', [])
-                overlap_texts = []
-                for mc in m_chunks:
+                best_match_idx = None
+                best_overlap = 0.0
+                
+                for mc_idx, mc in enumerate(m_chunks):
                     mc_s, mc_e = mc.get("start", 0), mc.get("end", 0)
-                    # 겹치는 구간의 텍스트 수집
-                    if mc_s < t_e and mc_e > t_s:
-                        overlap_texts.append(mc.get("text", "").strip())
-                row_cells[idx + 1].text = " ".join(overlap_texts)
-                for r in row_cells[idx + 1].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
+                    overlap_start = max(t_s, mc_s)
+                    overlap_end = min(t_e, mc_e)
+                    overlap = max(0.0, overlap_end - overlap_start)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_match_idx = mc_idx
+                        
+                if best_match_idx is not None:
+                    if best_match_idx in printed_chunks[m_name]:
+                        row_cells[idx + 2].text = "(이미 위에 포함됨)"
+                    else:
+                        row_cells[idx + 2].text = m_chunks[best_match_idx].get("text", "").strip()
+                        printed_chunks[m_name].add(best_match_idx)
+                else:
+                    row_cells[idx + 2].text = ""
+                for r in row_cells[idx + 2].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
                 
     doc.add_page_break()
     
@@ -476,6 +497,9 @@ def create_comparison_report(audio_path, output_dir, models_data, task_id="Compa
         base_model = valid_models[0]
         base_chunks = models_data[base_model].get('chunks_data', [])
         
+        # Keep track of printed/matched chunks for diarization to avoid double matching
+        printed_dia_chunks = {m: set() for m in valid_models}
+        
         for bc in base_chunks:
             t_s, t_e = bc.get("start", 0), bc.get("end", 0)
             time_label = f"[{int(t_s//60):02d}:{int(t_s%60):02d} ~ {int(t_e//60):02d}:{int(t_e%60):02d}]"
@@ -486,17 +510,39 @@ def create_comparison_report(audio_path, output_dir, models_data, task_id="Compa
             p_time.alignment = WD_ALIGN_PARAGRAPH.CENTER
             for r in p_time.runs: apply_text_styling(r, size_pt=8)
             
-            for idx, m_name in enumerate(valid_models):
+            # Base model diarization
+            spk = bc.get("speaker", "Unknown")
+            txt = bc.get("text", "").strip()[:15]
+            row_cells[1].text = f"[{spk}] {txt}.."
+            for r in row_cells[1].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
+            
+            # Other models diarization
+            for idx, m_name in enumerate(valid_models[1:]):
                 m_chunks = models_data[m_name].get('chunks_data', [])
-                overlap_spks = []
-                for mc in m_chunks:
+                best_match_idx = None
+                best_overlap = 0.0
+                
+                for mc_idx, mc in enumerate(m_chunks):
                     mc_s, mc_e = mc.get("start", 0), mc.get("end", 0)
-                    if mc_s < t_e and mc_e > t_s:
+                    overlap_start = max(t_s, mc_s)
+                    overlap_end = min(t_e, mc_e)
+                    overlap = max(0.0, overlap_end - overlap_start)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_match_idx = mc_idx
+                        
+                if best_match_idx is not None:
+                    if best_match_idx in printed_dia_chunks[m_name]:
+                        row_cells[idx + 2].text = "(이미 위에 포함됨)"
+                    else:
+                        mc = m_chunks[best_match_idx]
                         spk = mc.get("speaker", "Unknown")
                         txt = mc.get("text", "").strip()[:15]
-                        overlap_spks.append(f"[{spk}] {txt}..")
-                row_cells[idx + 1].text = "\n".join(overlap_spks)
-                for r in row_cells[idx + 1].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
+                        row_cells[idx + 2].text = f"[{spk}] {txt}.."
+                        printed_dia_chunks[m_name].add(best_match_idx)
+                else:
+                    row_cells[idx + 2].text = ""
+                for r in row_cells[idx + 2].paragraphs[0].runs: apply_text_styling(r, size_pt=8)
                 
         doc.add_page_break()
         
