@@ -122,14 +122,14 @@ Write-Host "Upgrading core pip packages..." -ForegroundColor Yellow
 $gpuAccelerated = "False"
 $hasTorchCuda = $false
 if ($hasNvidia) {
-    $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "import torch; print(torch.cuda.is_available())" 2>$null
+    $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "try: import torch; print(torch.cuda.is_available())`nexcept Exception: print('False')" 2>$null
     if ($pytorchCudaCheck -match "True") {
         Write-Host "PyTorch CUDA is already installed and functional." -ForegroundColor Green
         $hasTorchCuda = $true
     } else {
         Write-Host "Installing PyTorch CUDA..." -ForegroundColor Yellow
         & "$EnvDir\Scripts\pip.exe" install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --no-cache-dir
-        $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "import torch; print(torch.cuda.is_available())" 2>$null
+        $pytorchCudaCheck = & "$EnvDir\Scripts\python.exe" -c "try: import torch; print(torch.cuda.is_available())`nexcept Exception: print('False')" 2>$null
         if ($pytorchCudaCheck -match "True") {
             Write-Host "PyTorch CUDA verified." -ForegroundColor Green
             $hasTorchCuda = $true
@@ -139,7 +139,7 @@ if ($hasNvidia) {
 
 $hasFasterWhisper = $false
 try {
-    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
+    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "try: from faster_whisper import WhisperModel; print('Success')`nexcept Exception: print('Failed')" 2>$null
     if ($whisperCheck -match "Success") {
         $hasFasterWhisper = $true
     }
@@ -148,7 +148,7 @@ try {
 if (-not $hasFasterWhisper) {
     Write-Host "Installing faster-whisper..." -ForegroundColor Yellow
     & "$EnvDir\Scripts\pip.exe" install faster-whisper --no-cache-dir
-    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "from faster_whisper import WhisperModel; print('Success')" 2>$null
+    $whisperCheck = & "$EnvDir\Scripts\python.exe" -c "try: from faster_whisper import WhisperModel; print('Success')`nexcept Exception: print('Failed')" 2>$null
     if ($whisperCheck -match "Success") {
         $hasFasterWhisper = $true
     }
