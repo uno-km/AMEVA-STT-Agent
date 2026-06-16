@@ -181,7 +181,7 @@ except Exception:
 }
 
 Write-Host "Installing requirements..." -ForegroundColor Yellow
-& "$EnvDir\Scripts\pip.exe" install streamlit plotly pandas matplotlib numpy scipy scikit-learn vosk python-docx yt-dlp --upgrade --quiet
+& "$EnvDir\Scripts\pip.exe" install -r requirements.txt --quiet
 
 # [6] 폴더 생성
 $paths = @("C:\ameva\input", "C:\ameva\outputs", "$ScriptPath\db")
